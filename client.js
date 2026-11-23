@@ -681,6 +681,17 @@ window.__ModuleLoader__.load({
       return last
     }
 
+    /** A few rendered row keys, for the trace: does a key carry the message id? */
+    function keySample() {
+      try {
+        return [...document.querySelectorAll('[data-chat-node-key]')]
+          .slice(0, 3)
+          .map((el) => String(el.getAttribute('data-chat-node-key') || '').slice(0, 60))
+      } catch (error) {
+        return []
+      }
+    }
+
     /** Sessions whose history has already been paged to the top. */
     const pagedToTop = new Set()
 
@@ -719,12 +730,15 @@ window.__ModuleLoader__.load({
         }
         // Only a Session actually paged to the start may skip this next time.
         if (reachedTop) pagedToTop.add(sessionId)
-        report('jump-paged', { sessionId, reachedTop })
+        report('jump-paged', { sessionId, reachedTop, mid: Boolean(doc.mid), keys: keySample() })
       }
 
       // After paging to the start, "first in document order" is the first mention
       // by definition — and `docElement` also handles a mention rendered as text.
-      return rowByMessageId(doc.mid) || findTurnRow(doc.turn) || docElement(doc)
+      const byId = rowByMessageId(doc.mid)
+      const byTurn = byId ? null : findTurnRow(doc.turn)
+      report('jump-target', { mid: Boolean(doc.mid), byId: Boolean(byId), byTurn: Boolean(byTurn), keys: keySample() })
+      return byId || byTurn || docElement(doc)
     }
 
     function copyText(text) {
