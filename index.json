@@ -70,11 +70,11 @@
       "versions": [
         {
           "version": "2.0.0",
-          "publishTimestamp": 1795442521,
+          "publishTimestamp": 1795442570,
           "source": {
             "type": "git",
             "url": "https://github.com/bytedance/dsh-plugin-feishu-docs",
-            "commit": "03c75bdc90383fac3e7a5badd2b1f836cc89f945",
+            "commit": "419c3da0e728194832be18d5c3bfc28da16007f7",
             "path": "."
           },
           "engines": {
