@@ -12,6 +12,7 @@
 import { execFile } from 'node:child_process'
 import zlib from 'node:zlib'
 import { readSession } from './scan.js'
+import { enrichCreators, larkCli } from './owners.js'
 
 /** The web server owns the route table. */
 export const inject = ['webServer']
@@ -41,11 +42,13 @@ export function apply(ctx) {
           })
 
         if (url.pathname.endsWith('/doctor.json')) {
-          const fallbackCli = await which('zstd')
+          const [fallbackCli, lark] = await Promise.all([which('zstd'), larkCli()])
           return json({
             checkedAt: new Date().toISOString(),
             zstd: typeof zlib.zstdDecompressSync === 'function' ? 'core' : fallbackCli ? 'cli' : null,
             zstdPath: fallbackCli,
+            // Creators can only be filled in when this is not null.
+            larkCli: lark || null,
             node: process.version,
           })
         }
@@ -61,6 +64,13 @@ export function apply(ctx) {
           const result = await readSession(sid)
           if (!result) return json({ error: 'session log not found', sessionId: sid, docs: [] })
           if (result.error) return json(result, 200)
+          // The log names no creator; Feishu does. A failed lookup leaves the
+          // field empty rather than blocking the list.
+          try {
+            await enrichCreators(result.docs)
+          } catch (error) {
+            ctx.logger?.warn?.(`feishu-docs: cannot read creators: ${String(error)}`)
+          }
           return json(result)
         } catch (error) {
           ctx.logger?.warn?.(`feishu-docs: cannot read session ${sid}: ${String(error)}`)
