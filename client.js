@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.7', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.8', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.7', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.8', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -690,6 +690,35 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * What the popover shows when there is nothing to list.
+     *
+     * One centred block instead of a header saying "0 篇", a bare line of text and
+     * a footer about clicking things that are not there.
+     */
+    function EmptyState(props) {
+      const state = (props && props.state) || 'empty'
+      const title = state === 'loading' ? '读取中…' : state === 'error' ? '读取会话记录失败' : '这个会话还没有飞书文档'
+      const hint = state === 'loading'
+        ? ''
+        : state === 'error'
+          ? '稍后重新打开浮层再试一次'
+          : '对话里出现飞书链接后，会自动收录到这里'
+      return h('div', { className: 'fd-empty' },
+        h('svg', {
+          className: 'fd-empty-icon', width: 30, height: 30, viewBox: '0 0 16 16', 'aria-hidden': true,
+        },
+          h('path', {
+            d: 'M4.6 12.2a2.9 2.9 0 0 1-.3-5.8 3.9 3.9 0 0 1 7.4.9 2.5 2.5 0 0 1-.4 4.9z',
+            stroke: 'currentColor', strokeWidth: 1.1, fill: 'none',
+            strokeLinejoin: 'round', strokeLinecap: 'round',
+          }),
+        ),
+        h('div', { className: 'fd-empty-title' }, title),
+        hint ? h('div', { className: 'fd-empty-hint' }, hint) : null,
+      )
+    }
+
     /** A small amber badge for the "still needs something" card. */
     function WarnIcon() {
       return h('svg', { width: 13, height: 13, viewBox: '0 0 16 16', 'aria-hidden': true, style: { flex: 'none' } },
@@ -996,6 +1025,11 @@ window.__ModuleLoader__.load({
           .fd-pop-head { display:flex; align-items:center; gap:6px; padding:8px 10px; font-size:11.5px; opacity:.6;
                          border-bottom:1px solid color-mix(in srgb, currentColor 10%, transparent); }
           .fd-pop-body { overflow:auto; min-height:0; }
+          .fd-empty { display:flex; flex-direction:column; align-items:center; gap:5px;
+                      padding:20px 18px 22px; text-align:center; }
+          .fd-empty-icon { opacity:.26; }
+          .fd-empty-title { font-size:12px; opacity:.7; }
+          .fd-empty-hint { font-size:10.5px; opacity:.42; line-height:1.45; max-width:250px; }
           .fd-pop-day { padding:4px 10px; font-size:10.5px; opacity:.45;
                         background:color-mix(in srgb, currentColor 4%, transparent); }
           .fd-pop-row { display:flex; align-items:center; gap:7px; padding:6px 10px; min-width:0; }
@@ -1177,19 +1211,17 @@ window.__ModuleLoader__.load({
                     authFlow.error ? h('span', { className: 'fd-setup-err' }, authFlow.error) : null,
                   )
                 : null,
-              h('div', { className: 'fd-pop-head' },
-                h('span', null, '本会话云文档'),
-                h('span', { style: { marginLeft: 'auto' } }, `${docs.length} 篇`),
-              ),
-              h('div', { className: 'fd-pop-body' },
-                docs.length === 0
-                  ? h('div', { className: 'fd-pop-empty' },
-                      data && data.error
-                        ? '读取会话记录失败，稍后重试。'
-                        : data
-                          ? '这个会话里还没有飞书文档'
-                          : '读取中…')
-                  : null,
+              docs.length
+                ? h('div', { className: 'fd-pop-head' },
+                    h('span', null, '本会话云文档'),
+                    h('span', { style: { marginLeft: 'auto' } }, `${docs.length} 篇`),
+                  )
+                : null,
+              docs.length === 0
+                ? h(EmptyState, { state: data ? (data.error ? 'error' : 'empty') : 'loading' })
+                : null,
+              docs.length
+                ? h('div', { className: 'fd-pop-body' },
                 docs.map((d, i) => h('div', { key: d.u },
                   (i === 0 || docs[i - 1].d !== d.d)
                     ? h('div', { className: 'fd-pop-day' }, dayLabel(d.d))
@@ -1203,16 +1235,21 @@ window.__ModuleLoader__.load({
                     h(JumpButton, { doc: d, onTrigger: () => go(d) }),
                   ),
                 )),
-              ),
-              h('div', { className: 'fd-pop-foot' },
-                h('span', { className: 'fd-pop-hint' },
-                  note || (setupItems.length
-                    ? `还差 ${setupItems.length} 项设置`
-                    : doctor && doctor.creatorNames && doctor.creatorNames !== 'ok'
-                      ? '创建者显示为 id：通讯录权限未授予'
-                      : '点标题打开飞书，点 ⊙ 定位到该轮'),
-                ),
-              ),
+                  )
+                : null,
+              // With nothing to list the footer is advice about rows that are not
+              // there; only a transient note (a copied command) keeps it alive.
+              docs.length || note
+                ? h('div', { className: 'fd-pop-foot' },
+                    h('span', { className: 'fd-pop-hint' },
+                      note || (setupItems.length
+                        ? `还差 ${setupItems.length} 项设置`
+                        : doctor && doctor.creatorNames && doctor.creatorNames !== 'ok'
+                          ? '创建者显示为 id：通讯录权限未授予'
+                          : '点标题打开飞书，点 ⊙ 定位到该轮'),
+                    ),
+                  )
+                : null,
             )
           : null,
       )
@@ -1222,7 +1259,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.2.7')
+        console.info('[feishu-docs] client apply, version 2.2.8')
         beacon('apply')
 
         try {
