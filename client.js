@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.3', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.4', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.3', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.4', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -359,33 +359,25 @@ window.__ModuleLoader__.load({
     function docNode(doc) {
       const token = String((doc && doc.u) || '').split('/').pop()
       if (!token) return null
+
       // The token is unique to the document, so the whole transcript is the honest
-      // search space. Scoping to `[data-chat-turn="N"]` missed messages whose row
-      // carries a different turn than the one recorded in the log.
-      const links = [...document.querySelectorAll('a[href]')].filter(isVisibleRow)
+      // search space — scoping to `[data-chat-turn="N"]` missed messages whose row
+      // carries a different turn than the one recorded in the log. It must stop at
+      // the transcript, though: this popover renders the same URLs as links, and a
+      // document-wide query marked the list row instead of the message.
+      const root = transcript() || document
+
+      const links = [...root.querySelectorAll('a[href]')].filter(isVisibleRow)
       const link = links.find((el) => {
         const href = el.getAttribute('href') || ''
         return href.includes(token) || (el.textContent || '').includes(token)
       })
       if (link) return link
 
-      const scope = [...document.querySelectorAll('[data-chat-turn]')].filter(isVisibleRow)
-
-      // The link the message actually rendered is the best target: highlighting it
-      // marks the document itself, and it scrolls with the message. Only visible
-      // ones count — a collapsed tool card can hold the same href, and marking
-      // something the reader cannot see looks exactly like "nothing happened".
-      for (const root of scope) {
-        for (const anchor of root.querySelectorAll('a[href]')) {
-          if (!isVisibleRow(anchor)) continue
-          const href = anchor.getAttribute('href') || ''
-          if (href.includes(token) || (anchor.textContent || '').includes(token)) return anchor
-        }
-      }
-      // No visible anchor (a plain-text mention): mark the smallest visible row
-      // that shows it.
-      const mentions = scope
-        .filter((root) => (root.textContent || '').includes(token) && isVisibleRow(root))
+      // No link (a plain-text mention): the smallest visible row that shows it.
+      const rows = [...root.querySelectorAll('[data-chat-turn]')].filter(isVisibleRow)
+      const mentions = rows
+        .filter((row) => (row.textContent || '').includes(token))
         .sort((a, b) => {
           const x = a.getBoundingClientRect()
           const y = b.getBoundingClientRect()
