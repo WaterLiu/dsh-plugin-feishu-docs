@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.4', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.5', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.4', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.5', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -367,6 +367,7 @@ window.__ModuleLoader__.load({
       // document-wide query marked the list row instead of the message.
       const root = transcript() || document
 
+      // 1. The link the message rendered: marking it marks the document itself.
       const links = [...root.querySelectorAll('a[href]')].filter(isVisibleRow)
       const link = links.find((el) => {
         const href = el.getAttribute('href') || ''
@@ -374,21 +375,23 @@ window.__ModuleLoader__.load({
       })
       if (link) return link
 
-      // No link (a plain-text mention): the smallest visible row that shows it.
-      const rows = [...root.querySelectorAll('[data-chat-turn]')].filter(isVisibleRow)
-      const mentions = rows
-        .filter((row) => (row.textContent || '').includes(token))
-        .sort((a, b) => {
-          const x = a.getBoundingClientRect()
-          const y = b.getBoundingClientRect()
-          return x.width * x.height - y.width * y.height
-        })
-      return mentions[0] || null
+      // 2. The text node that shows it — inside a code block, a table cell, or a
+      // plain mention there is no anchor, and its parent is the tight element to
+      // mark. The turn row would be the whole message, which is what made the
+      // highlight cover half the screen.
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.nodeValue || !node.nodeValue.includes(token)) continue
+        const host = node.parentElement
+        if (host && isVisibleRow(host)) return host
+      }
+      return null
     }
 
     /** The mark currently on screen, and the timer that keeps it there. */
     let marked = null
     let markTimer = null
+    let markKey = null
 
     /** Remove the mark; safe to call when there is none. */
     function clearDocMark() {
@@ -399,6 +402,10 @@ window.__ModuleLoader__.load({
       for (const el of document.querySelectorAll('.fd-doc-hit')) {
         el.classList.remove('fd-doc-hit')
         delete el.dataset.fresh
+      }
+      if (markKey) {
+        window.removeEventListener('keydown', markKey, true)
+        markKey = null
       }
       marked = null
     }
@@ -417,6 +424,12 @@ window.__ModuleLoader__.load({
 
       let reported = false
       const paint = () => {
+        // Re-resolve only when the previous target is gone: the walk is cheap but
+        // not free, and re-running it on every tick would make scrolling stutter.
+        if (marked && marked.isConnected && marked.classList.contains('fd-doc-hit')) {
+          marked.dataset.fresh = ''
+          return
+        }
         const node = docNode(doc)
         if (!node) {
           if (!reported) {
@@ -441,11 +454,9 @@ window.__ModuleLoader__.load({
       markTimer = window.setInterval(paint, 400)
 
       const onKey = (event) => {
-        if (event.key === 'Escape') {
-          window.removeEventListener('keydown', onKey, true)
-          clearDocMark()
-        }
+        if (event.key === 'Escape') clearDocMark()
       }
+      markKey = onKey
       window.addEventListener('keydown', onKey, true)
     }
 
