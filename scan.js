@@ -10,14 +10,17 @@
  * Node 22.15+ can decompress zstd in core; older runtimes fall back to the `zstd`
  * binary when it happens to be installed.
  */
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import zlib from 'node:zlib'
 
-const SESSIONS_ROOT = join(homedir(), '.dsh', 'sessions')
+const STATE = process.env.FEISHU_DOCS_STATE_DIR || join(homedir(), '.dsh')
+const SESSIONS_ROOT = join(STATE, 'sessions')
+/** Where per-Session scan state lives, so a restart does not re-read every log. */
+const INDEX_FILE = join(STATE, 'feishu-docs-sessions.json')
 const LOG_NAME = 'session.v4.jsonl.zstd'
 
 /** `https://<tenant>/<kind>/<token>` — the only links that count as documents. */
@@ -147,14 +150,18 @@ const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
  */
 function decodeFrames(buffer) {
   const parts = []
+  // A frame that does not decode yet is a write in progress: report how far the
+  // buffer was consumed so the next scan resumes there instead of skipping it.
+  let consumed = buffer.length
   for (let at = buffer.indexOf(ZSTD_MAGIC); at >= 0; at = buffer.indexOf(ZSTD_MAGIC, at + ZSTD_MAGIC.length)) {
     try {
       parts.push(zlib.zstdDecompressSync(buffer.subarray(at)).toString('utf8'))
     } catch (error) {
-      /* not a frame boundary; keep scanning */
+      consumed = at
+      break
     }
   }
-  return parts.join('')
+  return { text: parts.join(''), consumed }
 }
 
 /** Read the log: core zstd frame-by-frame, else the `zstd` binary. */
@@ -226,39 +233,92 @@ export async function locate(sessionId) {
   if (!found) return null
   try {
     const info = await stat(found.log)
-    return { ...found, rev: `${Math.round(info.mtimeMs)}:${info.size}` }
+    return { ...found, rev: `${Math.round(info.mtimeMs)}:${info.size}`, size: info.size }
   } catch (error) {
     return { ...found, rev: '' }
   }
 }
 
+/* ---------------------------------------------------------------- the state */
+
 /**
- * Every document one Session's messages mention.
+ * Per-Session scan state.
  *
- * Links that appear only inside tool output are ignored: the reader never saw
- * them as a message, so listing them would contradict what is on screen. The
- * exception is a create call, which marks the result as produced by DSH.
- *
- * @param sessionId - full or truncated Session id.
- * @returns `{ sessionId, project, docs }`, or null when the log is absent.
+ * A Session's log is append-only, and a Session is usually opened many times, so
+ * the whole log is read once and only the frames appended since are decoded
+ * afterwards. The state records how far it got, which is also the marker that the
+ * Session has been read end to end (`scannedAt`).
  */
-export async function readSession(sessionId) {
-  if (!sessionId) return null
-  const found = await locate(sessionId)
-  if (!found) return null
+const scans = new Map()
+let indexLoaded = false
+let saveTimer = null
 
-  let raw
+/** Read the on-disk index once, so a restart resumes instead of rescanning. */
+async function loadIndex() {
+  if (indexLoaded) return
+  indexLoaded = true
   try {
-    raw = await decompress(found.log)
+    const stored = JSON.parse(await readFile(INDEX_FILE, 'utf8'))
+    for (const [key, value] of Object.entries(stored)) {
+      scans.set(key, {
+        id: value.id,
+        project: value.project,
+        offset: value.offset || 0,
+        rev: value.rev || '',
+        scannedAt: value.scannedAt || 0,
+        turn: value.turn || 0,
+        docs: new Map((value.docs || []).map((doc) => [doc.k, doc])),
+        created: new Set(value.created || []),
+      })
+    }
   } catch (error) {
-    return { sessionId: found.id, project: basename(found.project), docs: [], error: String(error) }
+    /* first run, or an index we cannot read: everything is rescanned */
   }
+}
 
-  const docs = new Map()
-  const created = new Set()
-  let turn = 0
+/** Persist the index, debounced — polling would otherwise rewrite it constantly. */
+function queueSave() {
+  if (saveTimer) return
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    saveIndex().catch(() => { /* the index is an optimisation */ })
+  }, 300)
+}
 
-  for (const line of raw.split('\n')) {
+async function saveIndex() {
+  const out = {}
+  for (const [key, entry] of scans) {
+    out[key] = {
+      id: entry.id,
+      project: entry.project,
+      offset: entry.offset,
+      rev: entry.rev,
+      scannedAt: entry.scannedAt,
+      turn: entry.turn,
+      docs: [...entry.docs.values()],
+      created: [...entry.created],
+    }
+  }
+  await mkdir(dirname(INDEX_FILE), { recursive: true })
+  await writeFile(INDEX_FILE, JSON.stringify(out))
+}
+
+/** Read `size - start` bytes from `path`. */
+async function readRange(path, start, size) {
+  if (start >= size) return Buffer.alloc(0)
+  const handle = await open(path, 'r')
+  try {
+    const buffer = Buffer.alloc(size - start)
+    await handle.read(buffer, 0, buffer.length, start)
+    return buffer
+  } finally {
+    await handle.close()
+  }
+}
+
+/** Fold one chunk of decompressed log into the Session's state. */
+function applyLines(entry, chunk) {
+  for (const line of chunk.split('\n')) {
     if (!line) continue
     let record
     try {
@@ -269,13 +329,13 @@ export async function readSession(sessionId) {
     const data = record.data || {}
 
     if (record.type === 'turn/start') {
-      if (data.turn != null) turn = data.turn
+      if (data.turn != null) entry.turn = data.turn
       continue
     }
 
     if (record.type === 'tool/call') {
       const args = String(data.arguments || '')
-      if (CREATE.test(args)) for (const hit of args.matchAll(DOC_URL)) created.add(hit[2])
+      if (CREATE.test(args)) for (const hit of args.matchAll(DOC_URL)) entry.created.add(hit[2])
       continue
     }
 
@@ -283,19 +343,20 @@ export async function readSession(sessionId) {
     const text = textOf(data)
     if (!text) continue
 
-    const atTurn = data.turn ?? turn
+    const atTurn = data.turn ?? entry.turn
     // The message's own id: the client finds the exact row with it, which `turn`
     // cannot promise once a document is mentioned many times.
     const messageId = (data.message && data.message.id) || ''
     for (const hit of docsInText(text)) {
       const key = `${hit.kind}/${hit.token}`
-      const seen = docs.get(key)
+      const seen = entry.docs.get(key)
       if (seen) {
         seen.count += 1
         if (!seen.t && hit.title) seen.t = hit.title
         continue
       }
-      docs.set(key, {
+      entry.docs.set(key, {
+        k: key,
         mid: messageId,
         t: hit.title,
         ty: KIND[hit.kind] || hit.kind,
@@ -307,13 +368,17 @@ export async function readSession(sessionId) {
       })
     }
   }
+}
 
-  const list = [...docs.values()].map((doc) => {
-    const token = doc.u.split('/').pop()
+/** The shape the popover consumes, derived from the state. */
+function payloadOf(entry, cached) {
+  const list = [...entry.docs.values()].map((doc) => {
+    const { k, ...rest } = doc
+    const token = String(doc.u || '').split('/').pop()
     return {
-      ...doc,
+      ...rest,
       t: doc.t || token, // a doc the text never named shows its token, not an empty row
-      new: created.has(token),
+      new: entry.created.has(token),
       by: '', // creator needs a Feishu lookup: see owners.js
       deleted: false, // whether the document still exists: see owners.js
       mid: doc.mid || '', // the first message that showed it
@@ -321,6 +386,68 @@ export async function readSession(sessionId) {
     }
   })
   list.sort((a, b) => (a.turn || 0) - (b.turn || 0))
+  return {
+    sessionId: entry.id,
+    project: basename(entry.project),
+    docs: list,
+    rev: entry.rev,
+    // The marker: this Session has been read end to end, at this time.
+    scanned: entry.offset > 0,
+    scannedAt: entry.scannedAt || 0,
+    cached,
+  }
+}
 
-  return { sessionId: found.id, project: basename(found.project), docs: list, rev: found.rev }
+/**
+ * Every document one Session's messages mention.
+ *
+ * Links that appear only inside tool output are ignored: the reader never saw
+ * them as a message, nor do links inside code. The first read consumes the whole
+ * log; later reads only decode the frames appended since, which is what makes
+ * polling every few seconds affordable.
+ *
+ * @param sessionId - full or truncated Session id.
+ * @returns `{ sessionId, project, docs, rev, scanned, scannedAt, cached }`, or
+ *   null when the log is absent.
+ */
+export async function readSession(sessionId) {
+  if (!sessionId) return null
+  const found = await locate(sessionId)
+  if (!found) return null
+  await loadIndex()
+
+  const key = `${found.project}/${found.id}`
+  let entry = scans.get(key)
+  if (!entry) {
+    entry = { id: found.id, project: found.project, offset: 0, rev: '', scannedAt: 0, turn: 0, docs: new Map(), created: new Set() }
+    scans.set(key, entry)
+  }
+
+  const unchanged = Boolean(entry.rev) && entry.rev === found.rev
+  if (!unchanged) {
+    try {
+      let chunk
+      let consumed
+      if (typeof zlib.zstdDecompressSync === 'function') {
+        const start = Math.min(entry.offset || 0, found.size)
+        chunk = await readRange(found.log, start, found.size)
+        const decoded = decodeFrames(chunk)
+        chunk = decoded.text
+        consumed = decoded.consumed
+        entry.offset = start + consumed
+      } else {
+        // No core zstd: the binary has no ranges, so this is a full read.
+        chunk = await decompress(found.log)
+        entry.offset = found.size
+      }
+      applyLines(entry, chunk)
+      entry.rev = found.rev
+      entry.scannedAt = Date.now()
+      queueSave()
+    } catch (error) {
+      return { sessionId: entry.id, project: basename(entry.project), docs: [], error: String(error) }
+    }
+  }
+
+  return payloadOf(entry, unchanged)
 }

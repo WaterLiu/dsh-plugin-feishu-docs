@@ -33,7 +33,7 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 Restart DSH. The chip appears in the header of every Session.
 
-The list follows the Session by itself: while the popover is open it asks the host every 2.5s whether the log grew (every 6s while it is closed), and the host answers from a `stat` — size and modification time — so an unchanged log is never decompressed.
+The list follows the Session by itself: while the popover is open it asks the host every 2.5s whether the log grew (every 6s while it is closed), and the host answers from a `stat` — size and modification time — so an unchanged log is never decompressed. The first visit to a Session scans its log end to end and records that as a `scannedAt` marker; later visits decode only the frames appended since, resuming from a byte offset kept in `~/.dsh/feishu-docs-sessions.json`, so history is analysed once and never again.
 
 ## How it works
 

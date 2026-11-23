@@ -70,6 +70,13 @@ tail -5 ~/.dsh/feishu-docs-log.ndjson
 
 不用关掉再打开：浮层打开时每 2.5 秒、收起时每 6 秒向宿主问一次"会话日志有没有变"。宿主只对日志文件做一次 stat 比对版本（文件大小 + 修改时间），**没变就直接回 `unchanged`、不解压**，所以轮询很便宜。你刚发出的飞书链接通常一两秒内就会出现在胶囊数字和列表里。
 
+**每个会话第一次进入时会全量扫描一次**，之后只解析新增的部分：
+
+- 日志是 zstd 帧的追加流，扫描状态记录了"已消费到第几字节"（`~/.dsh/feishu-docs-sessions.json`）
+- 再来时直接从上次的字节位置往后读，只解压新帧——所以历史消息不会重复分析
+- 状态里带 `scannedAt` 作为**"该会话已全量扫描过"的标识**：`/x-feishu-docs/session.json` 的返回里也有 `scanned` / `scannedAt` / `cached` 三个字段，`cached: true` 表示这次没有重新解析
+- 宿主重启后也沿用这份索引，不会把每个会话重扫一遍
+
 ## 搜索与筛选
 
 有文档时，浮层里会出现一个搜索框和「来自用户」筛选：
@@ -107,7 +114,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.6.0
+[feishu-docs] client apply, version 2.7.0
 [feishu-docs] header chip registered
 ```
 
