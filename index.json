@@ -69,12 +69,12 @@
       },
       "versions": [
         {
-          "version": "2.8.0",
-          "publishTimestamp": 1795466250,
+          "version": "2.8.1",
+          "publishTimestamp": 1795466372,
           "source": {
             "type": "git",
             "url": "https://github.com/WaterLiu/dsh-plugin-feishu-docs",
-            "commit": "1ed753dd015e1fddcb941ae5ef70a5316ec74495",
+            "commit": "122002b9602799c30623770a185c7a26eb6a72d9",
             "path": "."
           },
           "engines": {
