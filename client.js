@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.9.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.9.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.9.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.9.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -565,28 +565,6 @@ window.__ModuleLoader__.load({
       return transcript()
     }
 
-    /**
-     * Nudge the transcript to its top so the app's own infinite scroll loads more.
-     *
-     * The last resort in {@link loadOlderOnce}: upstream called this without ever
-     * defining it, so paging history threw `nudgeTop is not defined` — the path only
-     * reached when a jump has to load older messages.
-     *
-     * @returns whether anything moved.
-     */
-    function nudgeTop() {
-      const scroller = transcript()
-      if (!scroller) return false
-      const before = scroller.scrollTop
-      try {
-        scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
-      } catch (error) {
-        /* no WheelEvent in this engine */
-      }
-      scroller.scrollTop = 0
-      scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
-      return Math.abs(scroller.scrollTop - before) > 2
-    }
 
     /**
      * Scroll one element into the middle of the transcript.
@@ -669,7 +647,10 @@ window.__ModuleLoader__.load({
       try {
         // Reading the scope-addressed service can itself throw for a context
         // without a Session tag, so the access belongs inside this guard.
-        const api = pluginCtx && pluginCtx.conversation
+        // Two possible service names depending on the build; both are optional, so
+        // this is a runtime lookup rather than an `inject` dependency (a missing
+        // service in `inject` would block the whole plugin from activating).
+        const api = (pluginCtx && (pluginCtx.conversation || pluginCtx.uiConversation)) || null
         if (api && typeof api.loadOlder === 'function') {
           await Promise.race([
             Promise.resolve(api.loadOlder()).then(() => { settled = true }),
@@ -680,10 +661,10 @@ window.__ModuleLoader__.load({
         failure = String(error)
       }
       report('jump-loadolder', { settled, failure })
-      if (settled) return true
-      const nudged = nudgeTop()
-      report('jump-nudge', { nudged })
-      return nudged
+      // No history control and no API: report failure instead of dragging the view
+      // somewhere else. Yanking the transcript to the top looked like "the jump did
+      // nothing" — worse than admitting history cannot be paged from here.
+      return settled
     }
 
     /**
@@ -762,8 +743,10 @@ window.__ModuleLoader__.load({
       const ready = rowByMessageId(doc.mid, doc.seq) || findTurnRow(doc.turn)
       if (ready) return anchorInTurn() || ready
 
-      // Page older history until the recorded turn is mounted.
-      for (let attempt = 0; attempt < 40; attempt += 1) {
+      // Page older history until the recorded turn is mounted. Bounded tightly:
+      // a jump that cannot reach the first mention should still land somewhere
+      // within a second or two, not spin for ten.
+      for (let attempt = 0; attempt < 6; attempt += 1) {
         onProgress?.(attempt + 1)
         const more = await loadOlderOnce()
         await new Promise((resolve) => window.setTimeout(resolve, 200))
@@ -1241,9 +1224,10 @@ window.__ModuleLoader__.load({
           flash(`第 ${doc.turn} 轮仍未加载 · 已复制位置`, 2600)
           return
         }
+        const exact = Boolean(findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq))
         await revealRow(target, doc)
         markDocument(doc)
-        flash(`已定位到第 ${doc.turn} 轮`, 2200)
+        flash(exact ? `已定位到第 ${doc.turn} 轮` : '已定位到最近可加载的位置', 2400)
       }
 
       const toggle = () => {
