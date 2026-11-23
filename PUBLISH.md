@@ -10,8 +10,8 @@ DSH 的插件市场**没有中央审核**：市场就是一份 **索引 JSON**�
 ## 一、把代码推到 GitHub
 
 ```bash
-cd dsh-feishu-docs                 # 本目录
-git remote add origin https://github.com/WaterLiu/dsh-feishu-docs.git
+cd dsh-plugin-feishu-docs          # 本目录
+git remote add origin https://github.com/WaterLiu/dsh-plugin-feishu-docs.git
 git push -u origin main
 ```
 
@@ -68,7 +68,7 @@ node tools/make-index.mjs --npm    # 或者用 npm 源
 
 | 方式 | 索引 URL |
 |---|---|
-| 索引和代码同一个仓库 | `https://raw.githubusercontent.com/WaterLiu/dsh-feishu-docs/main/index.json` |
+| 索引和代码同一个仓库 | `https://raw.githubusercontent.com/WaterLiu/dsh-plugin-feishu-docs/main/index.json` |
 | 单独一个索引仓库（推荐，可列多个插件） | `https://raw.githubusercontent.com/<你>/dsh-plugin-market/main/index.json` |
 | GitHub Pages | `https://<你>.github.io/dsh-plugin-market/index.json` |
 
@@ -83,13 +83,13 @@ Discover 页 → 索引 → 添加 URL → 搜索“飞书云文档” → 安�
 **方式 B：直接给 spec（最省事）**
 
 ```
-Plugins → Add plugin → github:WaterLiu/dsh-feishu-docs
+Plugins → Add plugin → github:WaterLiu/dsh-plugin-feishu-docs
 ```
 
 **方式 C：让 Agent 装**
 
 ```
-plugin_manager install_bundle target: "github:WaterLiu/dsh-feishu-docs"
+plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 ```
 
 ## 五、发布到 npm（可选）

@@ -1,7 +1,7 @@
-url: https://github.com/WaterLiu/dsh-feishu-docs
-name: WaterLiu/dsh-feishu-docs
+url: https://github.com/WaterLiu/dsh-plugin-feishu-docs
+name: WaterLiu/dsh-plugin-feishu-docs
 category: docs
 description:
   en: Lists the Feishu documents a session's own messages mention, behind a header chip, with each document's creator and a jump back to the turn it appeared in.
   zh: 在会话标题栏显示一个胶囊，列出该会话消息中出现过的飞书云文档，含创建者，并可跳回该文档出现的那一轮。
-icon: https://raw.githubusercontent.com/WaterLiu/dsh-feishu-docs/main/assets/icon-180.png
+icon: https://raw.githubusercontent.com/WaterLiu/dsh-plugin-feishu-docs/main/assets/icon-180.png

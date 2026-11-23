@@ -5,13 +5,13 @@ DSH 插件，一个目录、无构建、无数据文件、无额外依赖。
 ## 安装
 
 ```
-Plugins → Add plugin → github:WaterLiu/dsh-feishu-docs
+Plugins → Add plugin → github:WaterLiu/dsh-plugin-feishu-docs
 ```
 
 或在会话里让 Agent 执行：
 
 ```
-plugin_manager install_bundle target: "github:WaterLiu/dsh-feishu-docs"
+plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 ```
 
 本地目录同样可以：**Plugins → Add plugin → 选中该文件夹**。

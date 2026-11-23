@@ -1,4 +1,4 @@
-# dsh-feishu-docs
+# dsh-plugin-feishu-docs
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that lists the Feishu (Lark) documents each Session's messages show: a `☁ N` chip in the conversation header, and a popover grouped by day.
 
@@ -20,13 +20,13 @@ Clicking `⊙` scrolls the transcript to that document's turn, paging older hist
 No build step, no data file, no credentials, no extra tools.
 
 ```
-Plugins → Add plugin → github:WaterLiu/dsh-feishu-docs
+Plugins → Add plugin → github:WaterLiu/dsh-plugin-feishu-docs
 ```
 
 Or from an agent session (needs `plugin_manager`, present in the Standard preset):
 
 ```
-plugin_manager install_bundle target: "github:WaterLiu/dsh-feishu-docs"
+plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 ```
 
 Restart DSH. The chip appears in the header of every Session.

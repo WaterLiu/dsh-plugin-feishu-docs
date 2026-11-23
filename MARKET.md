@@ -30,11 +30,11 @@ data/plugins/<owner>__<repo>.yml
 
 例：`data/plugins/WaterLiu__dsh-feishu-docs.yml`
 
-内容（`market-entry.yml` 已按 `WaterLiu/dsh-feishu-docs` 填好）：
+内容（`market-entry.yml` 已按 `WaterLiu/dsh-plugin-feishu-docs` 填好）：
 
 ```yaml
-url: https://github.com/WaterLiu/dsh-feishu-docs
-name: WaterLiu/dsh-feishu-docs
+url: https://github.com/WaterLiu/dsh-plugin-feishu-docs
+name: WaterLiu/dsh-plugin-feishu-docs
 category: docs
 description:
   en: Lists the Feishu documents a session's own messages mention, behind a header chip, with each document's creator and a jump back to the turn it appeared in.
@@ -124,7 +124,7 @@ git push origin add-feishu-docs
 - [ ] 仓库加了 `dsh-plugin` topic
 - [ ] 仓库创建满 1 天
 - [ ] `assets/icon-180.png` 已提交（PNG 不是 SVG）
-- [x] 条目文件已按 `WaterLiu/dsh-feishu-docs` 填好
+- [x] 条目文件已按 `WaterLiu/dsh-plugin-feishu-docs` 填好
 - [ ] `url` 与仓库地址逐字符一致
 - [ ] `description.en` 以句号结尾、无营销词、与代码一致
 - [ ] PR 只加了这 1 个文件，没动 README
