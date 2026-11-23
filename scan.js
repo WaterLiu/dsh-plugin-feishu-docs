@@ -9,7 +9,7 @@
  * Node 22.15+ can decompress zstd in core; older runtimes fall back to the `zstd`
  * binary when it happens to be installed.
  */
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, basename } from 'node:path'
@@ -31,6 +31,50 @@ const KIND_OF = {
 
 /** `https://<host>/<kind>/<token>` — the only links that count as documents. */
 const DOC_URL = /https:\/\/[^\s)\]"'<>]*?\/(docx|docs|sheets|base|wiki|slides|mindnotes)\/([A-Za-z0-9]{16,})/g
+
+/**
+ * A title written next to a bare URL, as pasted lists usually do:
+ * `1. 文档名 — https://…`, `- 文档名: https://…`, `文档名 https://…`.
+ */
+/** Whether a candidate is a usable title rather than a truncated reference. */
+function validTitle(text) {
+  const t = String(text || '').trim()
+  if (t.length < 2 || t.length > 160) return false
+  if (/^(?:wiki|docx|docs|sheets?|base|slides|mindnotes)\//i.test(t)) return false
+  if (/(?:\.\.\.|…)$/.test(t)) return false
+  if (/^https?:/i.test(t)) return false
+  if (/^[A-Za-z0-9_-]{16,}$/.test(t)) return false
+  return true
+}
+
+function titleFromLine(line, url) {
+  // Table rows put the title and the link in different cells: drop the links
+  // first, then keep the most descriptive remaining cell.
+  const withoutLinks = line.replace(/\[[^\]]*\]\([^)]*\)/g, ' ')
+  const cut = withoutLinks.replace(url, ' ')
+  const cleaned = cut
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^\s*(?:[-*•]|\d+[.)、])\s*/, '')
+    .replace(/^(?:DOCX|WIKI|SHEETS?|BASE|SLIDES|MINDNOTES)\s+/i, '')
+    .replace(/\s*\|\s*$/, '')
+    .replace(/[\s—–\-:：|,，、]+$/, '')
+    .replace(/^[\s—–\-:：|,，、]+/, '')
+    .replace(/[（(]\s*(?:wiki|docx|docs|sheet|sheets|base|slides)\s*[)）]/gi, '')
+    .trim()
+
+  let best = cleaned
+  if (cleaned.includes('|')) {
+    const cells = cleaned.split('|').map((cell) => cell.trim()).filter(Boolean)
+    best = cells.sort((a, b) => b.length - a.length)[0] || ''
+  }
+  best = best.replace(/^\s*\|+\s*|\s*\|+\s*$/g, '').trim()
+
+  if (best.length < 2 || best.length > 160) return ''
+  // A whole paragraph is not a title.
+  if (best.split(/\s+/).length > 16) return ''
+  return best
+}
 
 /** `[title](url)` — the title the message itself gave the link. */
 const MD_LINK = /\[([^\]\n]{1,200})\]\((https:\/\/[^\s)]+)\)/g
@@ -157,7 +201,7 @@ export async function readSession(sessionId) {
   const createdTokens = new Set()
   let currentTurn = 0
 
-  const remember = (kind, token, title, when, turn) => {
+  const remember = (kind, token, title, when, turn, url) => {
     const key = `${kind}/${token}`
     const existing = docs.get(key)
     if (existing) {
@@ -169,7 +213,8 @@ export async function readSession(sessionId) {
     docs.set(key, {
       t: title || '',
       ty: KIND_OF[kind] || kind,
-      u: `https://bytedance.larkoffice.com/${kind}/${token}`,
+      // Keep the URL the message used: tenants differ, so it must not be rebuilt.
+      u: url || '',
       turn: turn || 0,
       d,
       hm,
@@ -216,8 +261,24 @@ export async function readSession(sessionId) {
       if (doc) titled.set(doc[2], match[1].trim())
     }
 
+    // Bare URLs take their title from the line they sit on.
+    const lines = text.split('\n')
+    const lineTitle = new Map()
+    for (const line of lines) {
+      const urls = [...line.matchAll(DOC_URL)]
+      if (!urls.length) continue
+      for (const found of urls) {
+        if (lineTitle.has(found[2])) continue
+        const guess = titleFromLine(line, found[0])
+        if (guess) lineTitle.set(found[2], guess)
+      }
+    }
+
     for (const match of text.matchAll(DOC_URL)) {
-      remember(match[1], match[2], titled.get(match[2]), when, turn)
+      const label = titled.get(match[2])
+      const fallback = lineTitle.get(match[2])
+      const title = validTitle(label) ? label : validTitle(fallback) ? fallback : ''
+      remember(match[1], match[2], title, when, turn, match[0])
     }
   }
 
@@ -235,6 +296,210 @@ export async function readSession(sessionId) {
   list.sort((a, b) => (a.turn || 0) - (b.turn || 0))
 
   return { sessionId: found.id, project: basename(found.project), docs: list }
+}
+
+const TITLE_CACHE = join(homedir(), '.dsh', 'feishu-docs-titles.json')
+const OWNER_CACHE = join(homedir(), '.dsh', 'feishu-docs-owners.json')
+
+/** The document kind as the drive meta API names it. */
+const META_TYPE = { docx: 'docx', sheet: 'sheet', bitable: 'bitable', slides: 'slides', wiki: 'wiki', mindnote: 'mindnote' }
+
+/** Titles resolved from Feishu, so a token is only ever shown once. */
+async function loadTitleCache() {
+  try {
+    return JSON.parse(await readFile(TITLE_CACHE, 'utf8'))
+  } catch (error) {
+    return {}
+  }
+}
+
+async function saveTitleCache(cache) {
+  try {
+    await writeFile(TITLE_CACHE, JSON.stringify(cache, null, 1))
+  } catch (error) {
+    /* a cache that cannot be written only costs one extra lookup */
+  }
+}
+
+/** Ask the CLI for one document's real title. */
+function fetchTitle(url) {
+  return new Promise((done) => {
+    execFile('lark-cli', ['drive', '+inspect', '--as', 'user', '--url', url],
+      { timeout: 4000, env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1' } },
+      (error, stdout) => {
+        if (error) return done(null)
+        try {
+          const title = (JSON.parse(stdout).data || {}).title
+          done(title && String(title).trim() ? String(title).trim() : null)
+        } catch (parseError) {
+          done(null)
+        }
+      })
+  })
+}
+
+/**
+ * Replace guessed titles with the documents' real ones.
+ *
+ * The heuristic in this file reads the title out of the message text, which is
+ * usually right and costs nothing. When it is not — a bare URL, a truncated
+ * label — the authoritative title comes from Feishu, once, through the CLI, and
+ * is cached for every later open.
+ *
+ * @param entries - documents from {@link readSession}; mutated in place.
+ * @returns the same array.
+ */
+export async function enrichTitles(entries) {
+  const needs = entries.filter((doc) => !validTitle(doc.t) || doc.t === doc.u.split('/').pop())
+  if (!needs.length) return entries
+
+  const cache = await loadTitleCache()
+  const pending = []
+  for (const doc of needs) {
+    const token = doc.u.split('/').pop()
+    if (cache[token]) {
+      doc.t = cache[token]
+      continue
+    }
+    pending.push(doc)
+  }
+  if (!pending.length) return entries
+
+  const resolved = await Promise.all(pending.map(async (doc) => {
+    const title = await fetchTitle(doc.u)
+    if (!title) return false
+    doc.t = title
+    cache[doc.u.split('/').pop()] = title
+    return true
+  }))
+  if (resolved.some(Boolean)) await saveTitleCache(cache)
+  return entries
+}
+
+/** Run `task` over `items`, never more than `limit` at a time. */
+async function mapLimit(items, limit, task) {
+  const results = new Array(items.length)
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      results[index] = await task(items[index], index)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+/** Run the CLI with JSON output; resolves null instead of throwing. */
+function cli(args, timeout = 5000) {
+  return new Promise((done) => {
+    execFile('lark-cli', args,
+      { timeout, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } },
+      (error, stdout) => {
+        if (error) return done(null)
+        try {
+          const parsed = JSON.parse(stdout)
+          done(parsed && parsed.ok ? parsed.data : null)
+        } catch (parseError) {
+          done(null)
+        }
+      })
+  })
+}
+
+/** The signed-in person, so their own documents read as a name rather than "他人". */
+let selfOpenIdPromise = null
+function selfOpenId() {
+  if (!selfOpenIdPromise) {
+    selfOpenIdPromise = cli(['api', 'GET', '/open-apis/authen/v1/user_info', '--as', 'user'])
+      .then((data) => (data && data.open_id) || '')
+      .catch(() => '')
+  }
+  return selfOpenIdPromise
+}
+
+/**
+ * Fill in each document's creator.
+ *
+ * Owners come from one batch meta query for the whole list; names from the
+ * contact API, one call per distinct person, both cached by token/person so a
+ * Session opened twice costs a single read.
+ *
+ * @param entries - documents from {@link readSession}; `by` is set in place.
+ * @returns the same array.
+ */
+export async function enrichOwners(entries) {
+  const needs = entries.filter((doc) => !doc.by)
+  if (!needs.length) return entries
+
+  let cache
+  try {
+    cache = JSON.parse(await readFile(OWNER_CACHE, 'utf8'))
+  } catch (error) {
+    cache = {}
+  }
+
+  const unresolved = needs.filter((doc) => !(cache[doc.u.split('/').pop()] || {}).owner)
+  const wiki = unresolved.filter((doc) => doc.ty === 'wiki')
+  const other = unresolved.filter((doc) => doc.ty !== 'wiki')
+
+  if (other.length) {
+    const request = other.map((doc) => ({
+      doc_token: doc.u.split('/').pop(),
+      doc_type: META_TYPE[doc.ty] || 'docx',
+    }))
+    const meta = await cli(['api', 'POST', '/open-apis/drive/v1/metas/batch_query', '--as', 'user',
+      '--data', JSON.stringify({ request_docs: request, with_url: false })], 12000)
+    for (const item of (meta && meta.metas) || []) {
+      // Cache only real answers: an empty row would suppress every later retry.
+      if (item.doc_token && item.owner_id) cache[item.doc_token] = { owner: item.owner_id }
+    }
+  }
+
+  // A wiki node keeps its owner on the node, not in the drive meta answer.
+  // Feishu rate-limits a burst of CLI calls, so these run a few at a time.
+  await mapLimit(wiki, 3, async (doc) => {
+    const token = doc.u.split('/').pop()
+    const node = await cli(['api', 'GET', '/open-apis/wiki/v2/spaces/get_node', '--as', 'user',
+      '--params', JSON.stringify({ token })], 6000)
+    const owner = (node && node.node && (node.node.owner || node.node.creator)) || ''
+    if (owner) cache[token] = { owner }
+  })
+
+  // Names, one lookup per distinct owner.
+  const self = await selfOpenId()
+  const owners = [...new Set(Object.values(cache).map((row) => row && row.owner).filter(Boolean))]
+  const named = new Map()
+  await mapLimit(owners, 3, async (owner) => {
+    const known = Object.values(cache).find((row) => row && row.owner === owner && row.name)
+    if (known) return named.set(owner, known.name)
+    const data = await cli(['contact', '+get-user', '--as', 'user', '--user-id', owner], 4000)
+    const name = (data && data.user && data.user.name) || ''
+    if (!name) return
+    named.set(owner, name)
+    for (const row of Object.values(cache)) {
+      if (row && row.owner === owner) row.name = name
+    }
+  })
+
+  for (const doc of entries) {
+    const token = doc.u.split('/').pop()
+    const row = cache[token]
+    if (doc.new) {
+      doc.by = 'DSH'
+      continue
+    }
+    if (!row || !row.owner) continue
+    if (row.owner === self) doc.by = row.name || '你'
+    else doc.by = row.name || named.get(row.owner) || ''
+  }
+
+  try {
+    await writeFile(OWNER_CACHE, JSON.stringify(cache, null, 1))
+  } catch (error) {
+    /* the cache is an optimisation only */
+  }
+  return entries
 }
 
 /** Whether this runtime can decompress a Session log at all. */
