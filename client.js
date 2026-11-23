@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.6', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.7', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.6', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.7', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -690,6 +690,15 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** A small amber badge for the "still needs something" card. */
+    function WarnIcon() {
+      return h('svg', { width: 13, height: 13, viewBox: '0 0 16 16', 'aria-hidden': true, style: { flex: 'none' } },
+        h('path', { d: 'M8 1.8 15 14H1z', fill: 'none', stroke: '#B26B00', strokeWidth: 1.3, strokeLinejoin: 'round' }),
+        h('path', { d: 'M8 6.2v3.4', stroke: '#B26B00', strokeWidth: 1.3, strokeLinecap: 'round' }),
+        h('circle', { cx: 8, cy: 11.6, r: 0.85, fill: '#B26B00' }),
+      )
+    }
+
     /** The placeholder shown in the avatar slot while nobody is signed in. */
     function UserGlyph(props) {
       return h('svg', {
@@ -890,6 +899,10 @@ window.__ModuleLoader__.load({
 
       const docs = useMemo(() => (data && data.docs) || [], [data])
       const user = (doctor && doctor.user) || {}
+      // Signed out, the account card's 登录 button is the entry — repeating it as a
+      // warning would be the same instruction twice.
+      const setupItems = (doctor && Array.isArray(doctor.items) ? doctor.items : [])
+        .filter((entry) => entry.fix && !(entry.id === 'auth' && !user.available))
       // A new account means the previous failure no longer applies.
       useEffect(() => { setAvatarBroken(false) }, [user.avatar])
       /** Scopes to request from the avatar's login button, honouring the diagnosis. */
@@ -997,21 +1010,31 @@ window.__ModuleLoader__.load({
           .fd-pop-gone a { opacity:.5; text-decoration:line-through; }
           .fd-pop-del { flex:none; font-size:10px; padding:0 4px; border-radius:4px;
                         color:#B42318; background:color-mix(in srgb, #F04438 16%, transparent); }
-          .fd-setup { display:flex; flex-direction:column; gap:6px; padding:8px 10px;
-                      border-bottom:1px solid color-mix(in srgb, currentColor 10%, transparent);
-                      background:color-mix(in srgb, #FF8800 7%, transparent); }
-          .fd-setup-title { font-size:11.5px; font-weight:600; }
-          .fd-setup-item { display:flex; align-items:center; gap:6px; font-size:11.5px; min-width:0; }
-          .fd-setup-text { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
-                           white-space:nowrap; opacity:.85; }
-          .fd-setup-go { flex:none; height:20px; padding:0 8px; border-radius:10px; cursor:pointer;
-                         font:inherit; font-size:10.5px; color:inherit;
-                         background:color-mix(in srgb, currentColor 8%, transparent);
-                         border:1px solid color-mix(in srgb, currentColor 18%, transparent); }
-          .fd-setup-go:hover { background:color-mix(in srgb, currentColor 16%, transparent); }
+          .fd-setup { margin:8px 10px; padding:9px 11px 10px; border-radius:10px;
+                      display:flex; flex-direction:column; gap:8px;
+                      background:color-mix(in srgb, #FFB020 7%, transparent);
+                      border:1px solid color-mix(in srgb, #E8A33D 30%, transparent); }
+          .fd-setup-title { display:flex; align-items:center; gap:6px;
+                            font-size:11.5px; font-weight:600; color:#8A5A00; }
+          .fd-setup-item { display:flex; align-items:center; gap:8px; min-width:0; }
+          .fd-setup-text { flex:1 1 auto; min-width:0; }
+          .fd-setup-name { font-size:11.5px; line-height:1.35; }
+          .fd-setup-detail { font-size:10.5px; line-height:1.35; opacity:.6;
+                             overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          .fd-setup-go { flex:none; height:22px; padding:0 10px; border-radius:11px; cursor:pointer;
+                         font:inherit; font-size:11px; color:#8A5A00;
+                         background:color-mix(in srgb, #FFB020 18%, transparent);
+                         border:1px solid color-mix(in srgb, #E8A33D 45%, transparent); }
+          .fd-setup-go:hover { background:color-mix(in srgb, #FFB020 30%, transparent); }
           .fd-setup-link { display:flex; align-items:center; gap:6px; font-size:11px; flex-wrap:wrap; }
-          .fd-user-auth { padding:7px 10px; background:color-mix(in srgb, #3370FF 7%, transparent);
-                          border-bottom:1px solid color-mix(in srgb, currentColor 10%, transparent); }
+          .fd-user-auth { margin:8px 10px; padding:8px 11px; border-radius:10px;
+                          justify-content:space-between;
+                          background:color-mix(in srgb, #3370FF 6%, transparent);
+                          border:1px solid color-mix(in srgb, #3370FF 26%, transparent); }
+          .fd-user-auth a { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+                            white-space:nowrap; }
+          .fd-user-auth .fd-auth-go { color:#fff; background:#3370FF; border-color:#3370FF; }
+          .fd-user-auth .fd-auth-go:hover { background:#245CE0; border-color:#245CE0; }
           .fd-setup-link a { color:#3370FF; text-decoration:underline; word-break:break-all; }
           .fd-setup-err { font-size:11px; color:#B42318; }
           .fd-user { display:flex; align-items:center; gap:8px; padding:9px 10px;
@@ -1115,12 +1138,17 @@ window.__ModuleLoader__.load({
                       onClick: (e) => { e.preventDefault(); if (!authFlow.busy) startAuth(loginScopes()) },
                     }, authFlow.busy ? '等待授权…' : '登录'),
               ),
-              doctor && doctor.items && doctor.items.some((entry) => entry.fix)
+              setupItems.length
                 ? h('div', { className: 'fd-setup' },
                     h('div', { className: 'fd-setup-title' },
-                      `还差 ${doctor.items.filter((entry) => entry.fix).length} 项设置，完成才能显示完整信息`),
-                    doctor.items.filter((entry) => entry.fix).map((item) => h('div', { key: item.id, className: 'fd-setup-item' },
-                      h('span', { className: 'fd-setup-text', title: `${item.title}：${item.detail}` }, `${item.title}：${item.detail}`),
+                      h(WarnIcon, null),
+                      h('span', null, `还差 ${setupItems.length} 项设置`),
+                    ),
+                    setupItems.map((item) => h('div', { key: item.id, className: 'fd-setup-item' },
+                      h('div', { className: 'fd-setup-text' },
+                        h('div', { className: 'fd-setup-name' }, item.title),
+                        h('div', { className: 'fd-setup-detail', title: item.detail }, item.detail),
+                      ),
                       item.fix.kind === 'command'
                         ? h('button', {
                             className: 'fd-setup-go', type: 'button',
@@ -1142,7 +1170,7 @@ window.__ModuleLoader__.load({
                       : null,
                     authFlow.url
                       ? h('button', {
-                          className: 'fd-setup-go', type: 'button',
+                          className: 'fd-setup-go fd-auth-go', type: 'button',
                           onClick: (e) => { e.preventDefault(); if (!authFlow.busy) finishAuth() },
                         }, authFlow.busy ? '确认中…' : '我已授权')
                       : null,
@@ -1178,8 +1206,8 @@ window.__ModuleLoader__.load({
               ),
               h('div', { className: 'fd-pop-foot' },
                 h('span', { className: 'fd-pop-hint' },
-                  note || (doctor && doctor.items && doctor.items.some((entry) => entry.fix)
-                    ? `还差 ${doctor.items.filter((entry) => entry.fix).length} 项设置`
+                  note || (setupItems.length
+                    ? `还差 ${setupItems.length} 项设置`
                     : doctor && doctor.creatorNames && doctor.creatorNames !== 'ok'
                       ? '创建者显示为 id：通讯录权限未授予'
                       : '点标题打开飞书，点 ⊙ 定位到该轮'),
@@ -1194,7 +1222,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.2.6')
+        console.info('[feishu-docs] client apply, version 2.2.7')
         beacon('apply')
 
         try {
