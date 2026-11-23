@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.5', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.6', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.5', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.6', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -360,32 +360,16 @@ window.__ModuleLoader__.load({
       const token = String((doc && doc.u) || '').split('/').pop()
       if (!token) return null
 
-      // The token is unique to the document, so the whole transcript is the honest
-      // search space — scoping to `[data-chat-turn="N"]` missed messages whose row
-      // carries a different turn than the one recorded in the log. It must stop at
-      // the transcript, though: this popover renders the same URLs as links, and a
-      // document-wide query marked the list row instead of the message.
+      // Only a clickable link is a valid target: the document is what the reader
+      // can click, and marking a code-block line (the same URL as a log line) is
+      // exactly what looked wrong. Anchors are searched in the transcript — not the
+      // whole page, where this popover's own list would match first.
       const root = transcript() || document
-
-      // 1. The link the message rendered: marking it marks the document itself.
       const links = [...root.querySelectorAll('a[href]')].filter(isVisibleRow)
-      const link = links.find((el) => {
+      return links.find((el) => {
         const href = el.getAttribute('href') || ''
         return href.includes(token) || (el.textContent || '').includes(token)
-      })
-      if (link) return link
-
-      // 2. The text node that shows it — inside a code block, a table cell, or a
-      // plain mention there is no anchor, and its parent is the tight element to
-      // mark. The turn row would be the whole message, which is what made the
-      // highlight cover half the screen.
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.nodeValue || !node.nodeValue.includes(token)) continue
-        const host = node.parentElement
-        if (host && isVisibleRow(host)) return host
-      }
-      return null
+      }) || null
     }
 
     /** The mark currently on screen, and the timer that keeps it there. */
