@@ -38,6 +38,10 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 退出只清除本机的飞书登录态，不动你的文档。退出后浮层会立刻变成「未登录飞书」，并出现「去授权」，重新授权一次即可恢复创建者、真实标题和删除标记。
 
+## 自动刷新
+
+不用关掉再打开：浮层打开时每 2.5 秒、收起时每 6 秒向宿主问一次"会话日志有没有变"。宿主只对日志文件做一次 stat 比对版本（文件大小 + 修改时间），**没变就直接回 `unchanged`、不解压**，所以轮询很便宜。你刚发出的飞书链接通常一两秒内就会出现在胶囊数字和列表里。
+
 ## 搜索与筛选
 
 有文档时，浮层里会出现一个搜索框和「来自用户」筛选：
@@ -74,7 +78,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.4.0
+[feishu-docs] client apply, version 2.4.1
 [feishu-docs] header chip registered
 ```
 

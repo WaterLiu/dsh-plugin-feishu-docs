@@ -7,14 +7,16 @@
  * whether the document still exists.
  *
  * Routes:
- *   GET  /x-feishu-docs/session.json?sid=<id>  the documents of one Session;
+ *   GET  /x-feishu-docs/session.json?sid=<id>&rev=<rev>
+ *                                             the documents of one Session, or
+ *                                             `{ unchanged }` when nothing changed;
  *   GET  /x-feishu-docs/doctor.json           what this machine still needs;
  *   GET  /x-feishu-docs/avatar?u=<url>        the signed-in user's avatar, proxied;
  *   GET  /x-feishu-docs/auth/start?scopes=<csv>   begin a device-code login;
  *   GET  /x-feishu-docs/auth/finish?device=<code> complete it;
  *   GET  /x-feishu-docs/auth/logout               sign out.
  */
-import { readSession } from './scan.js'
+import { locate, readSession } from './scan.js'
 import { creatorStatus, enrichCreators } from './owners.js'
 import { cachedAvatar } from './avatar.js'
 import { diagnose, finishLogin, logout, startLogin } from './setup.js'
@@ -91,6 +93,13 @@ export function apply(ctx) {
         if (!sid) return json({ error: 'missing sid', docs: [] })
 
         try {
+          // The popover polls this while it is open. Answering "unchanged" from a
+          // stat keeps that cheap: a growing log is only parsed when it grew.
+          const found = await locate(sid)
+          if (!found) return json({ error: 'session log not found', sessionId: sid, docs: [] })
+          const known = url.searchParams.get('rev') || ''
+          if (known && found.rev && known === found.rev) return json({ unchanged: true, rev: found.rev })
+
           const result = await readSession(sid)
           if (!result) return json({ error: 'session log not found', sessionId: sid, docs: [] })
           if (result.error) return json(result, 200)

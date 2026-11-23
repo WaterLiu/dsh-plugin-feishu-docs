@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.0', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.1', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.0', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.1', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -777,6 +777,12 @@ window.__ModuleLoader__.load({
       const [avatarBroken, setAvatarBroken] = useState(false)
       const [query, setQuery] = useState('')
       const [creator, setCreator] = useState('')
+      // The log version this list was built from, so a poll can say "nothing new".
+      const revRef = React.useRef('')
+      const applyData = (next) => {
+        revRef.current = (next && next.rev) || ''
+        setData(next)
+      }
       const [open, setOpen] = useState(false)
       const [rect, setRect] = useState(null)
       const [note, setNote] = useState('')
@@ -787,6 +793,32 @@ window.__ModuleLoader__.load({
       // A different Session is a different list: an old query would filter it
       // against documents it was never about.
       useEffect(() => { setQuery(''); setCreator('') }, [fullId])
+
+      /**
+       * Ask the host whether this Session's log grew.
+       *
+       * The host answers `{ unchanged }` from a stat, so this is cheap enough to
+       * poll; the list and the chip number then follow new messages on their own
+       * instead of waiting for the popover to be reopened.
+       */
+      const pullSession = async () => {
+        if (!fullId) return
+        try {
+          const answer = await readJson(await fetch(`/x-feishu-docs/session.json?sid=${encodeURIComponent(fullId)}&rev=${encodeURIComponent(revRef.current)}&v=${Date.now()}`, { cache: 'no-store' }))
+          if (answer.unchanged) return
+          if (Array.isArray(answer.docs)) applyData(answer)
+        } catch (error) {
+          /* a dropped poll is not worth surfacing */
+        }
+      }
+
+      useEffect(() => {
+        if (!fullId) return undefined
+        // Faster while the list is on screen, gentler in the background; both only
+        // cost a stat until the log actually changes.
+        const timer = window.setInterval(pullSession, open ? 2500 : 6000)
+        return () => window.clearInterval(timer)
+      }, [fullId, open])
 
       /** Re-read readiness, so a first run and a lapsed login both surface here. */
       const refreshDoctor = () => fetch('/x-feishu-docs/doctor.json', { cache: 'no-store' })
@@ -802,7 +834,7 @@ window.__ModuleLoader__.load({
         if (!open) return undefined
         refreshDoctor()
         let alive = true
-        loadSession(fullId, true).then((d) => { if (alive) setData(d) }).catch(() => {})
+        loadSession(fullId, true).then((d) => { if (alive) applyData(d) }).catch(() => {})
         return () => { alive = false }
       }, [open, fullId])
 
@@ -841,7 +873,7 @@ window.__ModuleLoader__.load({
       const afterAuth = () => {
         flash('飞书授权完成', 2600)
         refreshDoctor()
-        loadSession(fullId, true).then((d) => setData(d)).catch(() => {})
+        loadSession(fullId, true).then(applyData).catch(() => {})
       }
 
       /**
@@ -908,7 +940,7 @@ window.__ModuleLoader__.load({
           }
           flash('已退出飞书账号', 2600)
           refreshDoctor()
-          loadSession(fullId, true).then((d) => setData(d)).catch(() => {})
+          loadSession(fullId, true).then(applyData).catch(() => {})
         } catch (error) {
           flash(String(error), 3200)
         }
@@ -942,7 +974,7 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         let alive = true
         loadSession(fullId)
-          .then((d) => { if (alive) setData(d) })
+          .then((d) => { if (alive) applyData(d) })
           .catch(() => {})
         return () => { alive = false }
       }, [fullId])
@@ -1034,7 +1066,7 @@ window.__ModuleLoader__.load({
           // A document may have been mentioned since the last render: re-read the
           // Session so the popover never shows a stale list.
           loadSession(fullId, true)
-            .then((d) => { setData(d) })
+            .then(applyData)
             .catch(() => {})
         }
         const box = chipRef.current && chipRef.current.getBoundingClientRect()
@@ -1350,7 +1382,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.4.0')
+        console.info('[feishu-docs] client apply, version 2.4.1')
         beacon('apply')
 
         try {

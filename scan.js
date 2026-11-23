@@ -10,7 +10,7 @@
  * Node 22.15+ can decompress zstd in core; older runtimes fall back to the `zstd`
  * binary when it happens to be installed.
  */
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -203,6 +203,28 @@ function stamp(ms) {
 /* ------------------------------------------------------------------ the scan */
 
 /**
+ * Locate a Session's log and describe its current version cheaply.
+ *
+ * The version is the file's size and modification time, so a caller can ask
+ * "anything new?" without decompressing anything: reading the whole log to
+ * discover that nothing changed would make polling expensive.
+ *
+ * @param sessionId - full or truncated Session id.
+ * @returns `{ log, project, id, rev }`, or null when the log is absent.
+ */
+export async function locate(sessionId) {
+  if (!sessionId) return null
+  const found = await findLog(String(sessionId))
+  if (!found) return null
+  try {
+    const info = await stat(found.log)
+    return { ...found, rev: `${Math.round(info.mtimeMs)}:${info.size}` }
+  } catch (error) {
+    return { ...found, rev: '' }
+  }
+}
+
+/**
  * Every document one Session's messages mention.
  *
  * Links that appear only inside tool output are ignored: the reader never saw
@@ -214,7 +236,7 @@ function stamp(ms) {
  */
 export async function readSession(sessionId) {
   if (!sessionId) return null
-  const found = await findLog(sessionId)
+  const found = await locate(sessionId)
   if (!found) return null
 
   let raw
@@ -288,5 +310,5 @@ export async function readSession(sessionId) {
   })
   list.sort((a, b) => (a.turn || 0) - (b.turn || 0))
 
-  return { sessionId: found.id, project: basename(found.project), docs: list }
+  return { sessionId: found.id, project: basename(found.project), docs: list, rev: found.rev }
 }

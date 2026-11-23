@@ -33,6 +33,8 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 Restart DSH. The chip appears in the header of every Session.
 
+The list follows the Session by itself: while the popover is open it asks the host every 2.5s whether the log grew (every 6s while it is closed), and the host answers from a `stat` — size and modification time — so an unchanged log is never decompressed.
+
 ## How it works
 
 The chip's host half reads the Session's own log — `~/.dsh/sessions/<project>/session-<id>/session.v4.jsonl.zstd` — and extracts Feishu links from its **user and assistant messages**. Nothing is precomputed. The log scan stays local; only the creator and the deleted check ask Feishu, through `lark-cli`, and only when it is installed.
