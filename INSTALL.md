@@ -60,7 +60,7 @@ tail -5 ~/.dsh/feishu-docs-log.ndjson
 
 高亮**直接加在消息里那个链接元素上**（一个 CSS 类，不画任何覆盖层），所以不存在"框对不上"的问题——它天然跟着内容滚动、天然不会盖住输入框。链接被 React 重渲染换掉时，会在保持期内每 250ms 重新贴上；如果链接当时不在视口里，会先把它滚进视口。定位方式是**用日志记录的"首次出现轮次" + 文档 token**：先按 `[data-chat-turn="N"]` 找到那一轮，再在轮内找含 token 的链接；如果那一轮还没挂载，就按需要往回翻历史直到它出现。
 
-补充一个实现约束：DSH 的视图节点里同时有 `id`（消息唯一标识）和 `anchorSeq`（日志序号），但**渲染到 DOM 上只有 `data-chat-node-key`（路由用的 key）**——消息 id 并不在 DOM 里。所以本插件不依赖 id 定位，而是靠轮次 + 文本。
+补充一个实现约束：DSH 的视图节点里同时有 `id`（消息唯一标识）和 `anchorSeq`（日志序号），但**渲染到 DOM 上只有 `data-chat-node-key`（路由用的 key）和 `data-chat-turn`**——消息 id 与序号都不在 DOM 里，DSH 自己的跳转接口（`jump = { turn, seq }`）也没有对外暴露。所以本插件不依赖 id 定位，而是靠记录的首次出现轮次 + 文档 token；需要时按轮次往回翻历史把它加载出来。
 
 **同一份文档在一个会话里往往出现很多次**（第一次介绍、后面复盘、再后来回填表格）。列表里只有一行，代表它**首次出现**的位置；跳转和高亮也只针对这第一次出现的消息，不会跳到后面某一处副本。
 
@@ -122,7 +122,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.8.5
+[feishu-docs] client apply, version 2.8.6
 [feishu-docs] header chip registered
 ```
 

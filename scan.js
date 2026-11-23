@@ -17,9 +17,10 @@ import { basename, dirname, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import zlib from 'node:zlib'
 
-const STATE = process.env.FEISHU_DOCS_STATE_DIR || join(homedir(), '.dsh')
-const SESSIONS_ROOT = join(STATE, 'sessions')
-/** Where per-Session scan state lives, so a restart does not re-read every log. */
+const DSH_HOME = join(homedir(), '.dsh')
+const SESSIONS_ROOT = join(DSH_HOME, 'sessions')
+/** Where our own scan state lives; DSH's sessions are not relocated by it. */
+const STATE = process.env.FEISHU_DOCS_STATE_DIR || DSH_HOME
 const INDEX_FILE = join(STATE, 'feishu-docs-sessions.json')
 const LOG_NAME = 'session.v4.jsonl.zstd'
 
