@@ -38,6 +38,15 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 退出只清除本机的飞书登录态，不动你的文档。退出后浮层会立刻变成「未登录飞书」，并出现「去授权」，重新授权一次即可恢复创建者、真实标题和删除标记。
 
+## 搜索与筛选
+
+有文档时，浮层里会出现一个搜索框和「来自用户」筛选：
+
+- 搜索框匹配**标题、创建者、以及文档 URL 里的 token**（标题还没拉到时也能用 token 搜），大小写不敏感，输入即时过滤；按 Esc 清空
+- 「来自用户」列出本会话真正出现过的创建者，选中即只看这个人的文档；没登录时没有创建者信息，这一栏自动隐藏
+- 有任何筛选时右侧出现「清除」，标题栏计数会显示 `匹配数 / 总数`
+- 切换会话会重置筛选条件
+
 ## 数据从哪来
 
 不需要准备任何数据。插件在你在打开浮层时，直接读**当前会话自己的日志**：
@@ -65,7 +74,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.3.1
+[feishu-docs] client apply, version 2.4.0
 [feishu-docs] header chip registered
 ```
 

@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.3.1', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.0', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.3.1', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.0', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -690,6 +690,21 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** Magnifier for the search field. */
+    function SearchIcon() {
+      return h('svg', { width: 13, height: 13, viewBox: '0 0 16 16', 'aria-hidden': true, style: { flex: 'none', opacity: 0.55 } },
+        h('circle', { cx: 7, cy: 7, r: 4.2, fill: 'none', stroke: 'currentColor', strokeWidth: 1.3 }),
+        h('path', { d: 'M10.2 10.2 13.4 13.4', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round' }),
+      )
+    }
+
+    /** Chevron for the creator select. */
+    function CaretIcon() {
+      return h('svg', { width: 10, height: 10, viewBox: '0 0 16 16', 'aria-hidden': true, style: { flex: 'none', opacity: 0.5 } },
+        h('path', { d: 'M4 6.2 8 10.2 12 6.2', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+      )
+    }
+
     /**
      * What the popover shows when there is nothing to list.
      *
@@ -760,12 +775,18 @@ window.__ModuleLoader__.load({
       const [authFlow, setAuthFlow] = useState({ busy: false, url: '', deviceCode: '', error: '' })
       const [logoutAsk, setLogoutAsk] = useState(false)
       const [avatarBroken, setAvatarBroken] = useState(false)
+      const [query, setQuery] = useState('')
+      const [creator, setCreator] = useState('')
       const [open, setOpen] = useState(false)
       const [rect, setRect] = useState(null)
       const [note, setNote] = useState('')
       const chipRef = React.useRef(null)
       const popRef = React.useRef(null)
       const renderBeaconed = React.useRef(0)
+
+      // A different Session is a different list: an old query would filter it
+      // against documents it was never about.
+      useEffect(() => { setQuery(''); setCreator('') }, [fullId])
 
       /** Re-read readiness, so a first run and a lapsed login both surface here. */
       const refreshDoctor = () => fetch('/x-feishu-docs/doctor.json', { cache: 'no-store' })
@@ -932,6 +953,17 @@ window.__ModuleLoader__.load({
       // warning would be the same instruction twice.
       const setupItems = (doctor && Array.isArray(doctor.items) ? doctor.items : [])
         .filter((entry) => entry.fix && !(entry.id === 'auth' && !user.available))
+
+      // Who appears in this Session's list, for the 来自用户 filter.
+      const creators = useMemo(() => [...new Set(docs.map((d) => d.by).filter(Boolean))].sort(), [docs])
+      const needle = query.trim().toLowerCase()
+      const shown = useMemo(() => docs.filter((d) => {
+        if (creator && d.by !== creator) return false
+        if (!needle) return true
+        // Title, creator and the token itself: a search box that only matched the
+        // visible title would miss the rows still showing a token.
+        return [d.t, d.by, d.u].some((field) => String(field || '').toLowerCase().includes(needle))
+      }), [docs, creator, needle])
       // A new account means the previous failure no longer applies.
       useEffect(() => { setAvatarBroken(false) }, [user.avatarAt])
       /** Scopes to request from the avatar's login button, honouring the diagnosis. */
@@ -1025,6 +1057,27 @@ window.__ModuleLoader__.load({
           .fd-pop-head { display:flex; align-items:center; gap:6px; padding:8px 10px; font-size:11.5px; opacity:.6;
                          border-bottom:1px solid color-mix(in srgb, currentColor 10%, transparent); }
           .fd-pop-body { overflow:auto; min-height:0; }
+          .fd-search { display:flex; align-items:center; gap:7px; margin:8px 10px 0; padding:0 9px;
+                       height:30px; border-radius:8px;
+                       background:var(--dsw-alias-bg-elevated, #fff);
+                       border:1px solid color-mix(in srgb, currentColor 16%, transparent); }
+          .fd-search:focus-within { border-color:#3370FF;
+                                    box-shadow:0 0 0 2px color-mix(in srgb, #3370FF 16%, transparent); }
+          .fd-search-input { flex:1 1 auto; min-width:0; border:0; outline:0; background:transparent;
+                             font:inherit; font-size:12px; color:inherit; }
+          .fd-search-input::placeholder { color:inherit; opacity:.4; }
+          .fd-search-input::-webkit-search-cancel-button { display:none; }
+          .fd-filters { display:flex; align-items:center; gap:8px; padding:7px 10px 8px; }
+          .fd-select-wrap { position:relative; display:inline-flex; align-items:center; }
+          .fd-select { appearance:none; height:24px; padding:0 20px 0 9px; border-radius:6px; cursor:pointer;
+                       font:inherit; font-size:11px; color:inherit; background:transparent;
+                       border:1px solid color-mix(in srgb, currentColor 18%, transparent); }
+          .fd-select:hover { background:color-mix(in srgb, currentColor 6%, transparent); }
+          .fd-select-wrap > svg { position:absolute; right:6px; pointer-events:none; }
+          .fd-clear { height:24px; padding:0 9px; border-radius:6px; cursor:pointer; font:inherit;
+                      font-size:11px; color:inherit; opacity:.7; background:transparent; border:0; }
+          .fd-clear:hover { opacity:1; text-decoration:underline; }
+          .fd-none { padding:16px 12px; text-align:center; font-size:11.5px; opacity:.5; }
           .fd-empty { display:flex; flex-direction:column; align-items:center; gap:5px;
                       padding:20px 18px 22px; text-align:center; }
           .fd-empty-icon { opacity:.26; }
@@ -1212,9 +1265,49 @@ window.__ModuleLoader__.load({
                   )
                 : null,
               docs.length
+                ? h('div', { className: 'fd-search' },
+                    h(SearchIcon, null),
+                    h('input', {
+                      className: 'fd-search-input', type: 'search', value: query,
+                      placeholder: '搜索文档或创建者', spellCheck: false,
+                      'aria-label': '搜索本文档列表',
+                      onChange: (e) => setQuery(e.target.value),
+                      onKeyDown: (e) => {
+                        if (e.key === 'Escape') {
+                          e.stopPropagation()
+                          setQuery('')
+                        }
+                      },
+                    }),
+                  )
+                : null,
+              // No known creator means nothing to filter by: signed out, every row
+              // has an empty 来自用户, so the pill would offer a single pointless option.
+              docs.length && (creators.length || needle || creator)
+                ? h('div', { className: 'fd-filters' },
+                    h('div', { className: 'fd-select-wrap' },
+                      h('select', {
+                        className: 'fd-select', value: creator, 'aria-label': '按创建者筛选',
+                        onChange: (e) => setCreator(e.target.value),
+                      },
+                        h('option', { value: '' }, '来自用户'),
+                        creators.map((name) => h('option', { key: name, value: name }, name)),
+                      ),
+                      h(CaretIcon, null),
+                    ),
+                    needle || creator
+                      ? h('button', {
+                          className: 'fd-clear', type: 'button',
+                          onClick: (e) => { e.preventDefault(); setQuery(''); setCreator('') },
+                        }, '清除')
+                      : null,
+                  )
+                : null,
+              docs.length
                 ? h('div', { className: 'fd-pop-head' },
                     h('span', null, '本会话云文档'),
-                    h('span', { style: { marginLeft: 'auto' } }, `${docs.length} 篇`),
+                    h('span', { style: { marginLeft: 'auto' } },
+                      shown.length === docs.length ? `${docs.length} 篇` : `${shown.length} / ${docs.length} 篇`),
                   )
                 : null,
               docs.length === 0
@@ -1222,8 +1315,11 @@ window.__ModuleLoader__.load({
                 : null,
               docs.length
                 ? h('div', { className: 'fd-pop-body' },
-                docs.map((d, i) => h('div', { key: d.u },
-                  (i === 0 || docs[i - 1].d !== d.d)
+                shown.length === 0
+                  ? h('div', { className: 'fd-none' }, '没有匹配的文档')
+                  : null,
+                shown.map((d, i) => h('div', { key: d.u },
+                  (i === 0 || shown[i - 1].d !== d.d)
                     ? h('div', { className: 'fd-pop-day' }, dayLabel(d.d))
                     : null,
                   h('div', { className: d.deleted ? 'fd-pop-row fd-pop-gone' : 'fd-pop-row' },
@@ -1254,7 +1350,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.3.1')
+        console.info('[feishu-docs] client apply, version 2.4.0')
         beacon('apply')
 
         try {
