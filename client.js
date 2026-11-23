@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.3', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.4', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.3', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.4', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -424,8 +424,10 @@ window.__ModuleLoader__.load({
      * Mark the whole message a jump landed on.
      *
      * The message can be taller than the viewport, so the tint covers the
-     * intersection of its rectangle with the viewport and follows it until the
-     * reader interacts: any wheel, touch, pointer, key or scroll retires it.
+     * intersection of its rectangle with the viewport and follows the row as it
+     * scrolls. It stays put: reading means scrolling, and a frame that vanished on
+     * the first scroll hid the very thing it was pointing at. It is retired by the
+     * next jump, or by Escape.
      *
      * @param row - the element the jump centred.
      * @param label - the document title, when the caller has one.
@@ -473,28 +475,15 @@ window.__ModuleLoader__.load({
 
       const interval = window.setInterval(place, 150)
 
-      const options = { capture: true, passive: true }
-      const dismiss = () => clearLanding()
-      const listeners = [
-        ['wheel', dismiss, options],
-        ['touchstart', dismiss, options],
-        ['pointerdown', dismiss, options],
-        ['keydown', dismiss, options],
-      ]
-      for (const [event, handler, opts] of listeners) window.addEventListener(event, handler, opts)
-
-      // The jump itself scrolls; start honouring scroll once it has settled.
-      const scrollGuard = window.setTimeout(() => {
-        window.addEventListener('scroll', dismiss, options)
-        listeners.push(['scroll', dismiss, options])
-      }, 450)
-
-      landing = {
-        node,
-        interval,
-        listeners,
-        dispose() { window.clearTimeout(scrollGuard) },
+      // Only a deliberate dismissal retires it: Escape. Scrolling, wheel, touch and
+      // clicks all happen while reading, so none of them may remove it.
+      const onKey = (event) => {
+        if (event.key === 'Escape') clearLanding()
       }
+      window.addEventListener('keydown', onKey, true)
+      const listeners = [['keydown', onKey, true]]
+
+      landing = { node, interval, listeners }
     }
 
     /** The scroll container that actually scrolls this row. */
@@ -818,7 +807,12 @@ window.__ModuleLoader__.load({
 
       // A different Session is a different list: an old query would filter it
       // against documents it was never about.
-      useEffect(() => { setQuery(''); setCreator('') }, [fullId])
+      useEffect(() => {
+        setQuery('')
+        setCreator('')
+        // A highlight belongs to the Session it was drawn in.
+        clearLanding()
+      }, [fullId])
 
       /**
        * Ask the host whether this Session's log grew.
@@ -1411,7 +1405,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.4.3')
+        console.info('[feishu-docs] client apply, version 2.4.4')
         beacon('apply')
 
         try {
