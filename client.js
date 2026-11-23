@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.0.0', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.0.1', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.0.0', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.0.1', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -50,7 +50,10 @@ function report(phase, extra) {
 beacon('module-eval')
 
 window.__ModuleLoader__.load({
-  id: '@local/dsh-plugin-feishu-docs',
+  // Must equal the package name: the host composes this bundle into a boot
+  // graph row whose id is the package name, and the browser module system
+  // materializes a row by looking up the factory registered under that id.
+  id: 'dsh-plugin-feishu-docs',
   factory(require) {
     const React = require('react')
     const h = React.createElement
@@ -885,7 +888,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.0.0')
+        console.info('[feishu-docs] client apply, version 2.0.1')
         beacon('apply')
 
         try {

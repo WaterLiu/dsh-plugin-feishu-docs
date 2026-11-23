@@ -35,7 +35,7 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.0.0
+[feishu-docs] client apply, version 2.0.1
 [feishu-docs] header chip registered
 ```
 
