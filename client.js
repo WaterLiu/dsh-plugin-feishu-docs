@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.5', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.6', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.5', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.6', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -354,7 +354,7 @@ window.__ModuleLoader__.load({
                                         0 0 0 3px color-mix(in srgb, #3370ff 10%, transparent);
                             animation: fd-land-in .18s ease-out; }
           .fd-landing-row[data-leaving] { opacity: 0; transition: opacity .2s ease-in; }
-          .fd-landing-tag { position: absolute; top: 6px; left: 10px; display: inline-flex; align-items: center;
+          .fd-landing-tag { position: absolute; top: 6px; right: 10px; display: inline-flex; align-items: center;
                             gap: 4px; max-width: calc(100% - 20px); padding: 1px 8px 1px 6px;
                             border-radius: 9px; font-size: 10.5px; line-height: 16px; color: #fff;
                             background: #3370ff; white-space: nowrap; overflow: hidden;
@@ -368,12 +368,29 @@ window.__ModuleLoader__.load({
     }
 
 
-    /** The transcript's own viewport, so a highlight can never cover the composer. */
+    /**
+     * Where a highlight may be drawn: the transcript, minus the floating composer.
+     *
+     * The scrollport runs to the bottom of the window and the composer floats on
+     * top of it, so clipping to the scrollport alone still draws the frame under
+     * the input box — which is what made a jump look like it had taken over the
+     * whole page.
+     */
     function transcriptRect() {
       const port = document.querySelector('[data-conversation-scroll]')
       const box = port && port.getBoundingClientRect()
-      if (box && box.height > 0) return { top: box.top, bottom: box.bottom, left: box.left, right: box.right }
-      return { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth }
+      const base = box && box.height > 0
+        ? { top: box.top, bottom: box.bottom, left: box.left, right: box.right }
+        : { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth }
+      const composer = document.querySelector('[data-composer]')
+      const cbox = composer && composer.getBoundingClientRect()
+      const ceiling = cbox && cbox.height > 0 ? cbox.top : Infinity
+      return {
+        top: Math.max(base.top, 0),
+        bottom: Math.min(base.bottom, window.innerHeight, ceiling),
+        left: Math.max(base.left, 0),
+        right: Math.min(base.right, window.innerWidth),
+      }
     }
 
     /** Area of an element, for picking the message rather than a wrapper around it. */
@@ -1418,7 +1435,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.4.5')
+        console.info('[feishu-docs] client apply, version 2.4.6')
         beacon('apply')
 
         try {
