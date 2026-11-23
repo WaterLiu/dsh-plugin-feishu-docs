@@ -102,10 +102,18 @@ function tokenOf(url) {
   return found ? found[2] : ''
 }
 
+/** Fenced blocks and inline code: URLs there are text, not links the reader can click. */
+const CODE_BLOCK = /```[\s\S]*?```|~~~[\s\S]*?~~~/g
+const INLINE_CODE = /`[^`\n]*`/g
+
 /** Every document link in one message, each with the best title its line offers. */
 function docsInText(text) {
   const hits = []
-  for (const line of text.split('\n')) {
+  // A URL inside a code fence or backticks is part of a command or a log line —
+  // the chat renders it as code, not as a link, so it is not a document the
+  // Session "shows". Prose mentions, bare or labelled, still count.
+  const prose = String(text).replace(CODE_BLOCK, ' ').replace(INLINE_CODE, ' ')
+  for (const line of prose.split('\n')) {
     const urls = [...line.matchAll(DOC_URL)]
     if (!urls.length) continue
 

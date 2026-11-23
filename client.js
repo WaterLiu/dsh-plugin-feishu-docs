@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.2', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.2', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -364,20 +364,25 @@ window.__ModuleLoader__.load({
       const scope = rows.length ? rows : [...document.querySelectorAll('[data-chat-turn]')]
 
       // The link the message actually rendered is the best target: highlighting it
-      // marks the document itself, and it scrolls with the message.
+      // marks the document itself, and it scrolls with the message. Only visible
+      // ones count — a collapsed tool card can hold the same href, and marking
+      // something the reader cannot see looks exactly like "nothing happened".
       for (const root of scope) {
         for (const anchor of root.querySelectorAll('a[href]')) {
+          if (!isVisibleRow(anchor)) continue
           const href = anchor.getAttribute('href') || ''
           if (href.includes(token) || (anchor.textContent || '').includes(token)) return anchor
         }
       }
-      // No anchor (a plain-text mention): mark the smallest row that shows it.
-      const mentions = scope.filter((root) => (root.textContent || '').includes(token))
-      mentions.sort((a, b) => {
-        const x = a.getBoundingClientRect()
-        const y = b.getBoundingClientRect()
-        return x.width * x.height - y.width * y.height
-      })
+      // No visible anchor (a plain-text mention): mark the smallest visible row
+      // that shows it.
+      const mentions = scope
+        .filter((root) => (root.textContent || '').includes(token) && isVisibleRow(root))
+        .sort((a, b) => {
+          const x = a.getBoundingClientRect()
+          const y = b.getBoundingClientRect()
+          return x.width * x.height - y.width * y.height
+        })
       return mentions[0] || null
     }
 

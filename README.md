@@ -41,7 +41,7 @@ The chip's host half reads the Session's own log — `~/.dsh/sessions/<project>/
 
 - A log is a *concatenation* of zstd frames; core Node stops after the first, so each frame is decoded separately (`scan.js`).
 - Titles come from the message's own Markdown link labels, so no API call is needed. When Feishu is reachable its own document title replaces a missing label or a bare token.
-- Links that appear only inside tool output are ignored: the reader never saw them as a message.
+- Links that appear only inside tool output are ignored: the reader never saw them as a message. So are links inside a code fence or backticks — the chat renders those as code, not as a link, so they are not documents the Session shows.
 - `新建` marks a document produced by a create command (`workbook-create`, `docs +create`, …).
 
 Bare URLs without a Markdown label fall back to their document token as the title until Feishu supplies the real one.

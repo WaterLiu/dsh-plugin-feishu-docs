@@ -78,7 +78,7 @@ tail -5 ~/.dsh/feishu-docs-log.ndjson
 ~/.dsh/sessions/<project>/session-<id>/session.v4.jsonl.zstd
 ```
 
-只取用户与助手消息里出现的飞书链接；工具输出里的链接不算（那些你在对话里看不到）。标题直接来自消息里的 Markdown 链接文字，所以不需要飞书授权。
+只取用户与助手消息里出现的飞书链接；工具输出里的链接不算（那些你在对话里看不到），**代码块和反引号里的 URL 也不算**（聊天里它们是代码，不是可点的链接）。标题直接来自消息里的 Markdown 链接文字，所以不需要飞书授权。
 
 清单本身在本机完成，除了解压日志不做任何网络请求。**创建者**是唯一的例外：日志里没有这个信息，插件通过本机的 `lark-cli`（用你已登录的飞书身份）查一次，结果缓存到 `~/.dsh/feishu-docs-owners.json`。没装 `lark-cli` 或没登录时，该列留空，不会编造。
 
@@ -97,7 +97,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.5.1
+[feishu-docs] client apply, version 2.5.2
 [feishu-docs] header chip registered
 ```
 
