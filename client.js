@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.4', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.5', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.4', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.5', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -367,40 +367,45 @@ window.__ModuleLoader__.load({
       }
     }
 
+
+    /** The transcript's own viewport, so a highlight can never cover the composer. */
+    function transcriptRect() {
+      const port = document.querySelector('[data-conversation-scroll]')
+      const box = port && port.getBoundingClientRect()
+      if (box && box.height > 0) return { top: box.top, bottom: box.bottom, left: box.left, right: box.right }
+      return { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth }
+    }
+
+    /** Area of an element, for picking the message rather than a wrapper around it. */
+    function areaOf(el) {
+      const box = el.getBoundingClientRect()
+      return box.width * box.height
+    }
+
     /**
-     * The bounding box of one whole turn.
+     * The element that actually shows a document.
      *
-     * A turn is the reader's message plus everything that answered it, spread
-     * over many rows that all carry `data-chat-turn`; framing one row would only
-     * cover the input. The union of those rows is the unit the reader calls "one
-     * message".
+     * A turn can hold dozens of messages, and framing the whole turn produced a box
+     * the size of the transcript. The row mentioning the document's title or token
+     * is the one worth marking; the smallest such row wins, because every ancestor
+     * of it contains the same text.
      *
-     * @param turn - the turn number.
-     * @param fallback - row to use when the turn's rows are not measurable.
-     * @returns a viewport rectangle, or null.
+     * @param turn - turn number, when known.
+     * @param fallback - the row the jump centred.
+     * @param doc - the document being jumped to.
+     * @returns an element, or null.
      */
-    function turnRect(turn, fallback) {
-      const rows = turn
-        ? [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)]
-        : []
-      let top = Infinity
-      let bottom = -Infinity
-      let left = Infinity
-      let right = -Infinity
-      for (const el of rows) {
-        const box = el.getBoundingClientRect()
-        if (box.height < 2) continue
-        if (box.top < top) top = box.top
-        if (box.bottom > bottom) bottom = box.bottom
-        if (box.left < left) left = box.left
-        if (box.right > right) right = box.right
-      }
-      if (!Number.isFinite(top)) {
-        if (!fallback) return null
-        const box = fallback.getBoundingClientRect()
-        return { top: box.top, bottom: box.bottom, left: box.left, right: box.right }
-      }
-      return { top, bottom, left, right }
+    function landingTarget(turn, fallback, doc) {
+      const needle = normalize(doc && doc.t).slice(0, 20)
+      const token = String((doc && doc.u) || '').split('/').pop()
+      if (!turn || (!needle && !token)) return fallback
+      const hits = [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)]
+        .filter((el) => {
+          const text = normalize(el.textContent)
+          return (needle && text.includes(needle)) || (token && text.includes(token))
+        })
+        .sort((a, b) => areaOf(a) - areaOf(b))
+      return hits[0] || fallback
     }
 
     /** The active highlight, so a new jump or any interaction can retire it. */
@@ -432,7 +437,7 @@ window.__ModuleLoader__.load({
      * @param row - the element the jump centred.
      * @param label - the document title, when the caller has one.
      */
-    function showLandingCard(row, label, turn) {
+    function showLandingCard(row, label, turn, doc) {
       if (!row && !turn) return
       clearLanding()
       ensureLandingStyles()
@@ -450,23 +455,31 @@ window.__ModuleLoader__.load({
       const tag = node.firstElementChild
 
       const place = () => {
-        const rect = turnRect(turn, row)
-        if (!rect) return
-        const height = rect.bottom - rect.top
-        if (height < 8) {
+        const target = landingTarget(turn, row, doc)
+        const box = (target && target.getBoundingClientRect()) || null
+        if (!box || box.height < 2) {
+          node.style.display = 'none'
+          return
+        }
+        const port = transcriptRect()
+        const top = Math.max(box.top, port.top)
+        const bottom = Math.min(box.bottom, port.bottom)
+        const left = Math.max(box.left, port.left)
+        const right = Math.min(box.right, port.right)
+        // Off-screen, or squeezed to nothing by the viewport: nothing to outline.
+        if (bottom - top < 8 || right - left < 8) {
           node.style.display = 'none'
           return
         }
         node.style.display = ''
-        const left = Math.max(rect.left, 0)
-        node.style.top = `${Math.round(rect.top)}px`
+        node.style.top = `${Math.round(top)}px`
         node.style.left = `${Math.round(left)}px`
-        node.style.width = `${Math.round(Math.min(rect.right - rect.left, window.innerWidth - left))}px`
-        node.style.height = `${Math.round(height)}px`
+        node.style.width = `${Math.round(right - left)}px`
+        node.style.height = `${Math.round(bottom - top)}px`
 
         if (tag) {
-          // Keep the label attached to whichever part of the turn is on screen.
-          tag.style.top = `${Math.round(Math.max(0, -rect.top) + 8)}px`
+          // Keep the label inside the frame even when the message is scrolled.
+          tag.style.top = `${Math.round(Math.min(Math.max(0, box.top - top), bottom - top - 26) + 8)}px`
         }
       }
 
@@ -507,7 +520,7 @@ window.__ModuleLoader__.load({
      * @param row - the visible element to centre.
      * @returns whether the container ended up moving.
      */
-    async function revealRow(row, label, turn) {
+    async function revealRow(row, label, turn, doc) {
       const scroller = scrollerFor(row)
       if (!scroller) return false
 
@@ -548,7 +561,7 @@ window.__ModuleLoader__.load({
         isScroller: scroller === transcript(),
       })
 
-      showLandingCard(row, label, turn)
+      showLandingCard(row, label, turn, doc)
       return moved
     }
 
@@ -1058,7 +1071,7 @@ window.__ModuleLoader__.load({
         const immediate = findTurnRow(doc.turn)
         if (immediate) {
           setOpen(false)
-          const moved = await revealRow(immediate, doc.t, doc.turn)
+          const moved = await revealRow(immediate, doc.t, doc.turn, doc)
           flash(moved ? `已定位到第 ${doc.turn} 轮` : `第 ${doc.turn} 轮已就位，但页面没能滚动`, 2600)
           return
         }
@@ -1073,7 +1086,7 @@ window.__ModuleLoader__.load({
         }
         if (row) {
           setOpen(false)
-          const moved = await revealRow(row, doc.t, doc.turn)
+          const moved = await revealRow(row, doc.t, doc.turn, doc)
           flash(moved ? `已定位到第 ${doc.turn} 轮` : `第 ${doc.turn} 轮已就位，但页面没能滚动`, 2600)
           return
         }
@@ -1405,7 +1418,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.4.4')
+        console.info('[feishu-docs] client apply, version 2.4.5')
         beacon('apply')
 
         try {
