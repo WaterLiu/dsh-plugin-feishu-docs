@@ -16,6 +16,7 @@
  */
 import { readSession } from './scan.js'
 import { creatorStatus, enrichCreators } from './owners.js'
+import { cachedAvatar } from './avatar.js'
 import { diagnose, finishLogin, logout, startLogin } from './setup.js'
 
 /** The web server owns the route table. */
@@ -42,31 +43,23 @@ export function apply(ctx) {
           return json({ ...report, creatorNames: creators.names || 'ok' })
         }
 
-        // Feishu hosts avatars on its own CDN. Serving it from here keeps the
-        // image same-origin, so a page policy cannot drop it, and the allowlist
-        // keeps this from becoming an open proxy.
+        // The avatar comes from the local cache, same-origin, so the page policy
+        // cannot drop it and the browser can revalidate cheaply.
         if (url.pathname.endsWith('/avatar')) {
-          let target = null
-          try {
-            target = new URL(String(url.searchParams.get('u') || ''))
-          } catch (error) {
-            return json({ error: 'bad url' }, 400)
+          const cached = await cachedAvatar()
+          if (!cached.bytes || !cached.bytes.length) return json({ error: 'no avatar' }, 404)
+          const tag = `"${cached.at}"`
+          if (request.headers.get('if-none-match') === tag) {
+            return new Response(null, { status: 304, headers: { etag: tag } })
           }
-          if (!/(^|\.)(feishu\.cn|feishucdn\.com|larksuite\.com|larksuitecdn\.com|larkoffice\.com)$/i.test(target.hostname)) {
-            return json({ error: 'host not allowed' }, 400)
-          }
-          try {
-            const upstream = await fetch(target, { redirect: 'follow' })
-            if (!upstream.ok) return json({ error: `upstream ${upstream.status}` }, 502)
-            const type = upstream.headers.get('content-type') || ''
-            if (!type.startsWith('image/')) return json({ error: 'not an image' }, 415)
-            return new Response(upstream.body, {
-              status: 200,
-              headers: { 'content-type': type, 'cache-control': 'private, max-age=600' },
-            })
-          } catch (error) {
-            return json({ error: String(error) }, 502)
-          }
+          return new Response(cached.bytes, {
+            status: 200,
+            headers: {
+              'content-type': cached.contentType || 'image/jpeg',
+              'cache-control': 'private, max-age=3600',
+              etag: tag,
+            },
+          })
         }
 
         // The authorization routes change state. A resource route only ever sees

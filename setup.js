@@ -13,6 +13,7 @@
 import { execFile } from 'node:child_process'
 import zlib from 'node:zlib'
 
+import { avatarFor } from './avatar.js'
 import { invoke, larkCli, run, why } from './cli.js'
 
 /** Scopes this plugin cannot work without: document metadata, titles, owners. */
@@ -75,30 +76,6 @@ async function authState() {
 }
 
 /**
- * The signed-in user's avatar, and why it is missing when it is.
- *
- * `authen/v1/user_info` is the endpoint that carries it, and the token this
- * plugin already needs covers it — the contact endpoints return names only, and
- * `contact/v3/users/{id}` demands a legacy scope family. A miss is cached for
- * five minutes, and the card falls back to an initial.
- */
-let avatarCache = { openId: '', url: '', at: 0, error: '' }
-async function findAvatar(openId) {
-  if (!openId) return { url: '', error: '' }
-  if (avatarCache.openId === openId && Date.now() - avatarCache.at < 5 * 60 * 1000) {
-    return { url: avatarCache.url, error: avatarCache.error }
-  }
-
-  const answer = await invoke(['api', 'GET', '/open-apis/authen/v1/user_info', '--as', 'user'], 6000)
-  const user = (answer && answer.ok && answer.data) || null
-  const url = (user && (user.avatar_middle || user.avatar_big || user.avatar_url || user.avatar_thumb)) || ''
-  const error = url ? '' : (answer && answer.ok ? 'user_info 没有返回 avatar 字段' : (why(answer) || 'user_info 调用失败'))
-
-  avatarCache = { openId, url: String(url || ''), at: Date.now(), error }
-  return { url: avatarCache.url, error: avatarCache.error }
-}
-
-/**
  * Everything a first run needs, in one object.
  *
  * @returns the readiness report served as `doctor.json`.
@@ -152,13 +129,15 @@ export async function diagnose() {
     })
   }
 
-  const avatar = auth.available ? await findAvatar(auth.openId) : { url: '', error: '' }
+  // Cached on disk by avatar.js: only the first open waits for the download.
+  const avatar = auth.available ? await avatarFor(auth.openId) : { bytes: null, url: '', at: 0, error: '' }
   const user = {
     available: auth.available,
     name: auth.userName,
     openId: auth.openId,
     brand: auth.brand,
-    avatar: avatar.url,
+    hasAvatar: Boolean(avatar.bytes),
+    avatarAt: avatar.at || 0,
     avatarError: avatar.error || '',
   }
 

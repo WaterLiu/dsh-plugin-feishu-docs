@@ -32,7 +32,7 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 ## 当前账号与退出
 
-浮层顶部是**当前飞书账号**：头像（经插件自身的 `/x-feishu-docs/avatar` 同源代理加载，只允许飞书域名；拿不到时用名字首字的圆形占位）、名字、`飞书个人用户 / Lark 个人用户`。右侧红色「退出」是两步的：第一次点击变成「确认退出」，再点一次才真正执行 `lark-cli auth logout`（6 秒内不确认会自动复位；也可以点「取消」）。
+浮层顶部是**当前飞书账号**：头像（**第一次拉取后缓存在 `~/.dsh/feishu-docs-avatar.img`**，之后首屏直接读本地、不再等网络；每 24 小时在后台回源一次看是否更新过，失败则继续用缓存。经插件自身的 `/x-feishu-docs/avatar` 同源提供，拿不到时用名字首字的圆形占位）、名字、`飞书个人用户 / Lark 个人用户`。右侧红色「退出」是两步的：第一次点击变成「确认退出」，再点一次才真正执行 `lark-cli auth logout`（6 秒内不确认会自动复位；也可以点「取消」）。
 
 还没登录时，头像位置是默认头像，右侧是一个蓝色「登录」按钮：点它直接发起授权，授权页会自动打开，授权链接也会留在账号卡片正下方。**你在浏览器里确认后不用回来点任何东西**——浮层会自己轮询（约 5 分钟内有效），token 一到就自动刷新成头像+名字+创建者（「我已授权」按钮只是手动兜底的加速）。
 
@@ -65,7 +65,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.2.8
+[feishu-docs] client apply, version 2.3.0
 [feishu-docs] header chip registered
 ```
 

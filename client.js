@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.8', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.3.0', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.8', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.3.0', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -933,7 +933,7 @@ window.__ModuleLoader__.load({
       const setupItems = (doctor && Array.isArray(doctor.items) ? doctor.items : [])
         .filter((entry) => entry.fix && !(entry.id === 'auth' && !user.available))
       // A new account means the previous failure no longer applies.
-      useEffect(() => { setAvatarBroken(false) }, [user.avatar])
+      useEffect(() => { setAvatarBroken(false) }, [user.avatarAt])
       /** Scopes to request from the avatar's login button, honouring the diagnosis. */
       const loginScopes = () => {
         const authItem = doctor && Array.isArray(doctor.items) && doctor.items.find((item) => item.id === 'auth')
@@ -1134,10 +1134,10 @@ window.__ModuleLoader__.load({
           ? h('div', { ref: popRef, className: 'fd-pop', style: { top: `${rect.top}px`, right: `${rect.right}px` } },
               h('div', { className: 'fd-user' },
                 user.available
-                  ? (user.avatar && !avatarBroken
+                  ? (user.hasAvatar && !avatarBroken
                       ? h('img', {
                           className: 'fd-user-avatar',
-                          src: `/x-feishu-docs/avatar?u=${encodeURIComponent(user.avatar)}`,
+                          src: `/x-feishu-docs/avatar?v=${user.avatarAt || 0}`,
                           alt: '',
                           onError: () => setAvatarBroken(true),
                         })
@@ -1259,7 +1259,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.2.8')
+        console.info('[feishu-docs] client apply, version 2.3.0')
         beacon('apply')
 
         try {
