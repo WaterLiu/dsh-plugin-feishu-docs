@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.8', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.6.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.8', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.6.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -339,20 +339,31 @@ window.__ModuleLoader__.load({
       try {
         const style = document.createElement('style')
         style.textContent = `
-          .fd-doc-hit { background: color-mix(in srgb, #FFB020 38%, transparent) !important;
-                        border-radius: 4px; box-decoration-break: clone;
-                        box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 50%, transparent);
-                        transition: background .35s ease, box-shadow .35s ease; }
-          @keyframes fd-doc-hit-pulse {
+          .fd-doc-hl { position: fixed; z-index: 65; pointer-events: none;
+                       border-radius: 4px;
+                       background: color-mix(in srgb, #FFB020 38%, transparent);
+                       box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 50%, transparent);
+                       transition: opacity .35s ease, background .35s ease; }
+          @keyframes fd-doc-hl-pulse {
             from { box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 60%, transparent); }
             to { box-shadow: 0 0 0 8px transparent; }
           }
-          .fd-doc-hit[data-fresh] { animation: fd-doc-hit-pulse .8s ease-out 2; }
-          .fd-doc-hit[data-out] { background: transparent !important; box-shadow: 0 0 0 2px transparent; }
+          .fd-doc-hl[data-fresh] { animation: fd-doc-hl-pulse .8s ease-out 2; }
+          .fd-doc-hl[data-out] { opacity: 0; }
         `
         document.head.appendChild(style)
       } catch (error) {
         /* styling is best effort */
+      }
+    }
+
+    /** The row DSH rendered for one message id, when it is mounted. */
+    function rowByMessageId(mid) {
+      if (!mid) return null
+      try {
+        return document.querySelector(`[data-chat-node-key*="${mid}"], [data-chat-anchor-key*="${mid}"]`)
+      } catch (error) {
+        return null
       }
     }
 
@@ -370,28 +381,34 @@ window.__ModuleLoader__.load({
         const href = el.getAttribute('href') || ''
         return href.includes(token) || (el.textContent || '').includes(token)
       }
-      const visible = (el) => isVisibleRow(el)
 
-      // A document is usually mentioned several times. The list row belongs to the
-      // first mention (`doc.turn` is the turn it was first seen in), so that is the
-      // occurrence to jump to and to mark — not whichever copy happens to be on
-      // screen. `data-chat-turn` is not always in step with the log, so a miss
-      // falls back to any visible copy.
+      // 1. The exact message that first showed it, by message id. A document is
+      //    usually mentioned many times, and the row in the list stands for the
+      //    first mention — so that is the one to mark, not a later copy.
+      const first = rowByMessageId(doc && doc.mid)
+      if (first) {
+        const hit = [...first.querySelectorAll('a[href]')].find(matches)
+        if (hit) return hit
+      }
+
+      // 2. Its turn, when the row keys do not carry the id we know.
       const turn = Number(doc && doc.turn)
       if (turn) {
-        const rows = [...root.querySelectorAll(`[data-chat-turn="${turn}"]`)]
-        for (const row of rows) {
-          const hit = [...row.querySelectorAll('a[href]')].find((el) => visible(el) && matches(el))
+        for (const row of [...root.querySelectorAll(`[data-chat-turn="${turn}"]`)]) {
+          const hit = [...row.querySelectorAll('a[href]')].find((el) => isVisibleRow(el) && matches(el))
           if (hit) return hit
         }
       }
-      return [...root.querySelectorAll('a[href]')].find((el) => visible(el) && matches(el)) || null
+
+      // 3. Any visible copy: better a later mention than no answer at all.
+      return [...root.querySelectorAll('a[href]')].find((el) => isVisibleRow(el) && matches(el)) || null
     }
 
-    /** The mark on screen, and the timers that put it there and take it away. */
-    let marked = null
+    /** The highlight element on screen, and the timers that place and retire it. */
+    let markNode = null
     let markTimer = null
     let markHold = null
+    let markScroll = null
     let markKey = null
 
     /** How long the mark stays once it is on screen, and how long we hunt for it. */
@@ -399,7 +416,7 @@ window.__ModuleLoader__.load({
     const MARK_LOOK = 4000
     const MARK_FADE = 380
 
-    /** Remove the mark; safe to call when there is none. */
+    /** Remove the highlight and every listener it installed. */
     function clearDocMark() {
       if (markTimer) {
         window.clearInterval(markTimer)
@@ -409,32 +426,95 @@ window.__ModuleLoader__.load({
         window.clearTimeout(markHold)
         markHold = null
       }
-      for (const el of document.querySelectorAll('.fd-doc-hit')) {
-        el.classList.remove('fd-doc-hit')
-        delete el.dataset.fresh
-        delete el.dataset.out
+      if (markScroll) {
+        window.removeEventListener('scroll', markScroll, true)
+        markScroll = null
       }
       if (markKey) {
         window.removeEventListener('keydown', markKey, true)
         markKey = null
       }
-      marked = null
-    }
-
-    /** Fade the mark out, then forget it. */
-    function fadeDocMark() {
-      for (const el of document.querySelectorAll('.fd-doc-hit')) el.dataset.out = ''
-      markHold = window.setTimeout(clearDocMark, MARK_FADE)
+      if (markNode) {
+        markNode.remove()
+        markNode = null
+      }
     }
 
     /**
-     * Highlight the document inside the message it appears in.
+     * Where the document first appears in the conversation, in viewport pixels.
      *
-     * The message list is virtualised: right after a jump the target is often not
-     * mounted yet, which is why the first click used to do nothing while the
-     * second worked. So the hunt keeps going for a few seconds, and only then
-     * gives up with a trace entry. Once found, the mark stays {@link MARK_HOLD}
-     * and fades out.
+     * The transcript is walked in document order — which is message order — over
+     * text nodes, so the *first* mention wins whether or not the renderer turned it
+     * into a link. Code is skipped: a URL inside a fence or backticks is a log
+     * line, not the document the chat shows.
+     *
+     * @param doc - the document the jump targeted.
+     * @returns a rect, or null when the document is not on screen right now.
+     */
+    function docRect(doc) {
+      const token = String((doc && doc.u) || '').split('/').pop()
+      if (!token) return null
+      const root = transcript() || document
+
+      // The exact message first, when its row is mounted: it is the earliest
+      // mention by construction, and cheaper than walking every text node.
+      const first = rowByMessageId(doc && doc.mid)
+      if (first) {
+        const box = first.getBoundingClientRect()
+        if (box.height > 4) {
+          const anchor = [...first.querySelectorAll('a[href]')].find((el) => (el.getAttribute('href') || '').includes(token))
+          return anchor ? anchor.getBoundingClientRect() : null
+        }
+      }
+
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.nodeValue || ''
+        const at = text.indexOf(token)
+        if (at < 0) continue
+        const host = node.parentElement
+        if (!host || host.closest('pre, code')) continue
+        const link = host.closest('a[href]')
+        if (link) {
+          const box = link.getBoundingClientRect()
+          if (box.width > 4) return box
+        }
+        const range = document.createRange()
+        try {
+          range.setStart(node, at)
+          range.setEnd(node, at + token.length)
+        } catch (error) {
+          continue
+        }
+        const box = range.getBoundingClientRect()
+        if (box.width > 4 && box.height > 4) return box
+      }
+      return null
+    }
+
+    /** Put the highlight where the document is, and keep it there while it moves. */
+    function placeDocMark(doc) {
+      const box = docRect(doc)
+      if (!box) return false
+      if (!markNode) {
+        markNode = document.createElement('div')
+        markNode.className = 'fd-doc-hl'
+        markNode.dataset.fresh = ''
+        document.body.appendChild(markNode)
+      }
+      markNode.style.top = `${Math.round(box.top - 2)}px`
+      markNode.style.left = `${Math.round(box.left - 2)}px`
+      markNode.style.width = `${Math.round(box.width + 4)}px`
+      markNode.style.height = `${Math.round(box.height + 4)}px`
+      return true
+    }
+
+    /**
+     * Highlight the document inside the message it first appears in.
+     *
+     * The list is virtualised, so right after a jump the target is often not
+     * mounted yet: the hunt runs every 250ms for four seconds before giving up.
+     * Once found, the mark stays {@link MARK_HOLD} and fades out.
      *
      * @param doc - the document the jump targeted.
      */
@@ -445,6 +525,7 @@ window.__ModuleLoader__.load({
       const token = String((doc && doc.u) || '').split('/').pop()
       const deadline = Date.now() + MARK_LOOK
       let reported = false
+      let found = false
 
       const settle = () => {
         if (markTimer) {
@@ -455,37 +536,41 @@ window.__ModuleLoader__.load({
       }
 
       const tick = () => {
-        if (marked && marked.isConnected && marked.classList.contains('fd-doc-hit')) {
-          settle()
-          return
-        }
-        const node = docNode(doc)
-        if (node) {
-          for (const el of document.querySelectorAll('.fd-doc-hit')) el.classList.remove('fd-doc-hit')
-          marked = node
-          node.classList.add('fd-doc-hit')
-          node.dataset.fresh = ''
-          if (!reported) {
-            reported = true
-            report('mark', { token, tag: node.tagName, turn: doc && doc.turn })
+        if (placeDocMark(doc)) {
+          if (!found) {
+            found = true
+            if (!reported) {
+              reported = true
+              report('mark', { token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
+            }
           }
           settle()
           return
         }
         if (Date.now() > deadline) {
-          if (!reported) report('mark-miss', { token, turn: doc && doc.turn })
+          if (!reported) report('mark-miss', { token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
           clearDocMark()
         }
       }
 
       tick()
-      if (!markHold) markTimer = window.setInterval(tick, 250)
+      if (!found) markTimer = window.setInterval(tick, 250)
+
+      // Keep it glued to the text while the reader scrolls inside the two seconds.
+      markScroll = () => { if (found) placeDocMark(doc) }
+      window.addEventListener('scroll', markScroll, true)
 
       const onKey = (event) => {
         if (event.key === 'Escape') clearDocMark()
       }
       markKey = onKey
       window.addEventListener('keydown', onKey, true)
+    }
+
+    /** Fade the highlight out, then remove it. */
+    function fadeDocMark() {
+      if (markNode) markNode.dataset.out = ''
+      markHold = window.setTimeout(clearDocMark, MARK_FADE)
     }
 
 
@@ -1063,7 +1148,7 @@ window.__ModuleLoader__.load({
       const jumpTo = async (doc) => {
         // The document's own node is the better scroll target: it lands on the
         // line the reader is looking for, not on the top of a long turn.
-        const immediate = docNode(doc) || findTurnRow(doc.turn)
+        const immediate = rowByMessageId(doc.mid) || docNode(doc) || findTurnRow(doc.turn)
         if (immediate) {
           const moved = await revealRow(immediate, doc)
           markDocument(doc)

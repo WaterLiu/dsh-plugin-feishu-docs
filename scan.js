@@ -284,6 +284,9 @@ export async function readSession(sessionId) {
     if (!text) continue
 
     const atTurn = data.turn ?? turn
+    // The message's own id: the client finds the exact row with it, which `turn`
+    // cannot promise once a document is mentioned many times.
+    const messageId = (data.message && data.message.id) || ''
     for (const hit of docsInText(text)) {
       const key = `${hit.kind}/${hit.token}`
       const seen = docs.get(key)
@@ -293,6 +296,7 @@ export async function readSession(sessionId) {
         continue
       }
       docs.set(key, {
+        mid: messageId,
         t: hit.title,
         ty: KIND[hit.kind] || hit.kind,
         // Keep the URL the message used: tenants differ, so it must not be rebuilt.
@@ -312,7 +316,7 @@ export async function readSession(sessionId) {
       new: created.has(token),
       by: '', // creator needs a Feishu lookup: see owners.js
       deleted: false, // whether the document still exists: see owners.js
-      mid: '',
+      mid: doc.mid || '', // the first message that showed it
       cid: '',
     }
   })
