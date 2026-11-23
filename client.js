@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.3', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.4', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.3', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.4', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -435,6 +435,16 @@ window.__ModuleLoader__.load({
       if (first) {
         const anchor = [...first.querySelectorAll('a[href]')].find(holds)
         if (anchor) return anchor
+      }
+
+      // 1b. Its turn, when the row keys do not carry the id: the recorded turn is
+      //     still the first mention, and rows for it are cheap to query.
+      const turn = Number(doc && doc.turn)
+      if (turn) {
+        for (const row of [...root.querySelectorAll(`[data-chat-turn="${turn}"]`)]) {
+          const anchor = [...row.querySelectorAll('a[href]')].find(holds)
+          if (anchor) return anchor
+        }
       }
 
       // 2. Any link in the transcript, in document order (the earliest mention).
