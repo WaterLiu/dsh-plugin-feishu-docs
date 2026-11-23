@@ -18,6 +18,18 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 **重启 DSH**，每个会话的标题栏就会出现 `☁ N`。
 
+## 首次使用
+
+第一次点开浮层，如果这台机器还缺东西，浮层顶部会直接列出**还差哪几项**，每项都给一个可点的动作：
+
+| 缺什么 | 面板上做什么 |
+|---|---|
+| `zstd`（Node 内置解压不可用时） | 「复制命令」→ `brew install zstd`，装完重开浮层 |
+| `lark-cli` | 「复制命令」→ `npm install -g @larksuite/cli` |
+| 飞书授权（未登录 / 权限不足） | 「去授权」→ 自动打开飞书授权页，并在面板里留一个「打开授权页面」链接；你在浏览器确认后点「我已授权」，浮层自动刷新 |
+
+授权只会申请这个插件真正读取的权限：`drive:drive.metadata:readonly`（标题、创建者、是否被删除）和 `contact:user:search`（把人名显示出来，可选）。**之后如果授权失效，再打开浮层会重新出现这一项，并给出新的授权链接**（设备码 10 分钟内有效，过期就再点一次「去授权」）。
+
 ## 数据从哪来
 
 不需要准备任何数据。插件在你在打开浮层时，直接读**当前会话自己的日志**：
@@ -43,7 +55,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.0.5
+[feishu-docs] client apply, version 2.1.0
 [feishu-docs] header chip registered
 ```
 

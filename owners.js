@@ -14,10 +14,11 @@
  * `~/.dsh/feishu-docs-owners.json` and re-asked at most every {@link TTL}, so a
  * deleted-then-restored document corrects itself.
  */
-import { execFile } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+
+import { invoke, invokeData, larkCli, why } from './cli.js'
 
 const CACHE = join(homedir(), '.dsh', 'feishu-docs-owners.json')
 
@@ -29,59 +30,6 @@ const META_TYPE = { docx: 'docx', sheet: 'sheet', bitable: 'bitable', slides: 's
 
 /** Feishu's answers for "this document is gone", as opposed to "you may not see it". */
 const GONE = /not exist|not found|no such|不存在|已删除|已被删除|deleted/i
-
-/** Resolved once: where `lark-cli` lives on this machine, or '' when absent. */
-let cliPath
-
-/**
- * Locate `lark-cli`.
- *
- * The plain shell runs first so an ordinary `PATH` decides; the login shell is
- * the fallback for a GUI process, whose `PATH` usually omits `~/.local/bin`.
- */
-function findCli() {
-  if (cliPath !== undefined) return Promise.resolve(cliPath)
-  const probe = (flag) => new Promise((done) => {
-    execFile('sh', [flag, 'command -v lark-cli'], (error, stdout) => {
-      done(!error && String(stdout).trim() ? String(stdout).trim() : '')
-    })
-  })
-  return probe('-c')
-    .then((found) => found || probe('-lc'))
-    .then((found) => {
-      cliPath = found
-      return found
-    })
-}
-
-/** Where `lark-cli` was found, or '' when this machine has none. */
-export function larkCli() {
-  return findCli()
-}
-
-/** Run one `lark-cli` call and return its parsed envelope, or null. */
-async function invoke(args, timeout) {
-  const bin = await findCli()
-  if (!bin) return null
-  const stdout = await new Promise((done) => {
-    execFile(bin, args, {
-      timeout,
-      maxBuffer: 8 * 1024 * 1024,
-      env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' },
-    }, (error, out) => done(String(out || '')))
-  })
-  try {
-    return JSON.parse(stdout)
-  } catch (error) {
-    return null
-  }
-}
-
-/** The `data` of a successful call, else null. */
-async function data(args, timeout = 8000) {
-  const parsed = await invoke(args, timeout)
-  return parsed && parsed.ok ? parsed.data : null
-}
 
 /** Token of a document URL — the last path segment. */
 function tokenOf(doc) {
@@ -130,7 +78,7 @@ async function scan(docs) {
   const known = new Set()
 
   if (rest.length) {
-    const answer = await data(['api', 'POST', '/open-apis/drive/v1/metas/batch_query', '--as', 'user',
+    const answer = await invokeData(['api', 'POST', '/open-apis/drive/v1/metas/batch_query', '--as', 'user',
       '--data', JSON.stringify({
         request_docs: rest.map((doc) => ({ doc_token: tokenOf(doc), doc_type: META_TYPE[doc.ty] || 'docx' })),
         with_url: false,
@@ -146,7 +94,7 @@ async function scan(docs) {
 
   // A wiki node keeps its owner on the node rather than in the drive metadata.
   await mapLimit(wiki, 3, async (doc) => {
-    const answer = await data(['api', 'GET', '/open-apis/wiki/v2/spaces/get_node', '--as', 'user',
+    const answer = await invokeData(['api', 'GET', '/open-apis/wiki/v2/spaces/get_node', '--as', 'user',
       '--params', JSON.stringify({ token: tokenOf(doc) })], 6000)
     if (!answer) return
     known.add(tokenOf(doc))
@@ -179,13 +127,6 @@ async function checkDocument(url) {
 }
 
 const nameOf = (user) => (user && (user.localized_name || user.name || user.en_name)) || ''
-
-/** Why a call failed, in one line, for the cache and for doctor.json. */
-function why(parsed) {
-  const error = (parsed && parsed.error) || {}
-  if (!error.message && !error.subtype) return ''
-  return `${error.subtype || error.type || 'error'}: ${String(error.message || '').slice(0, 160)}`
-}
 
 /**
  * Display names for a set of owner ids.
@@ -245,7 +186,7 @@ export async function creatorStatus() {
 export async function enrichCreators(docs) {
   if (!Array.isArray(docs) || !docs.length) return docs
   // No CLI on this machine: there is nobody to ask, and nothing worth caching.
-  if (!(await findCli())) return docs
+  if (!(await larkCli())) return docs
 
   const cache = await loadCache()
   const stale = (row) => !row || !row.checkedAt || Date.now() - row.checkedAt > TTL

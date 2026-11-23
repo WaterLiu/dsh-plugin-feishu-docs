@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.0.5', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.1.0', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.0.5', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.1.0', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -686,6 +686,7 @@ window.__ModuleLoader__.load({
       const shortId = fullId.slice(0, 20)
       const [data, setData] = useState(null)
       const [doctor, setDoctor] = useState(null)
+      const [authFlow, setAuthFlow] = useState({ busy: false, url: '', deviceCode: '', error: '' })
       const [open, setOpen] = useState(false)
       const [rect, setRect] = useState(null)
       const [note, setNote] = useState('')
@@ -693,14 +694,65 @@ window.__ModuleLoader__.load({
       const popRef = React.useRef(null)
       const renderBeaconed = React.useRef(0)
 
+      /** Re-read readiness, so a first run and a lapsed login both surface here. */
+      const refreshDoctor = () => fetch('/x-feishu-docs/doctor.json', { cache: 'no-store' })
+        .then((r) => r.json())
+        .then((report) => setDoctor(report))
+        .catch(() => {})
+
+      useEffect(() => { refreshDoctor() }, [])
+
+      // Opening the popover re-checks readiness and re-reads this Session, so a
+      // document mentioned a minute ago, or a scope granted a minute ago, shows up.
       useEffect(() => {
+        if (!open) return undefined
+        refreshDoctor()
         let alive = true
-        fetch('/x-feishu-docs/doctor.json', { cache: 'no-store' })
-          .then((r) => r.json())
-          .then((report) => { if (alive) setDoctor(report) })
-          .catch(() => {})
+        loadSession(fullId, true).then((d) => { if (alive) setData(d) }).catch(() => {})
         return () => { alive = false }
-      }, [])
+      }, [open, fullId])
+
+      /** Start the device-code login and show the link the user must open. */
+      const startAuth = async (scopes) => {
+        setAuthFlow({ busy: true, url: '', deviceCode: '', error: '' })
+        try {
+          const answer = await fetch('/x-feishu-docs/auth/start', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-feishu-docs': 'popover' },
+            body: JSON.stringify({ scopes }),
+          }).then((r) => r.json())
+          if (!answer.url) {
+            setAuthFlow({ busy: false, url: '', deviceCode: '', error: answer.error || '发起授权失败' })
+            return
+          }
+          setAuthFlow({ busy: false, url: answer.url, deviceCode: answer.deviceCode, error: '' })
+          try { window.open(answer.url, '_blank', 'noreferrer') } catch (error) { /* the link is shown anyway */ }
+        } catch (error) {
+          setAuthFlow({ busy: false, url: '', deviceCode: '', error: String(error) })
+        }
+      }
+
+      /** Finish it once the user says they confirmed in the browser. */
+      const finishAuth = async () => {
+        setAuthFlow((prev) => ({ ...prev, busy: true, error: '' }))
+        try {
+          const answer = await fetch('/x-feishu-docs/auth/finish', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-feishu-docs': 'popover' },
+            body: JSON.stringify({ deviceCode: authFlow.deviceCode }),
+          }).then((r) => r.json())
+          if (!answer.ok) {
+            setAuthFlow((prev) => ({ ...prev, busy: false, error: answer.error || '授权未完成' }))
+            return
+          }
+          setAuthFlow({ busy: false, url: '', deviceCode: '', error: '' })
+          flash('授权完成，正在刷新…', 2600)
+          refreshDoctor()
+          loadSession(fullId, true).then((d) => setData(d)).catch(() => {})
+        } catch (error) {
+          setAuthFlow((prev) => ({ ...prev, busy: false, error: String(error) }))
+        }
+      }
 
       useEffect(() => {
         let alive = true
@@ -811,6 +863,21 @@ window.__ModuleLoader__.load({
           .fd-pop-gone a { opacity:.5; text-decoration:line-through; }
           .fd-pop-del { flex:none; font-size:10px; padding:0 4px; border-radius:4px;
                         color:#B42318; background:color-mix(in srgb, #F04438 16%, transparent); }
+          .fd-setup { display:flex; flex-direction:column; gap:6px; padding:8px 10px;
+                      border-bottom:1px solid color-mix(in srgb, currentColor 10%, transparent);
+                      background:color-mix(in srgb, #FF8800 7%, transparent); }
+          .fd-setup-title { font-size:11.5px; font-weight:600; }
+          .fd-setup-item { display:flex; align-items:center; gap:6px; font-size:11.5px; min-width:0; }
+          .fd-setup-text { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+                           white-space:nowrap; opacity:.85; }
+          .fd-setup-go { flex:none; height:20px; padding:0 8px; border-radius:10px; cursor:pointer;
+                         font:inherit; font-size:10.5px; color:inherit;
+                         background:color-mix(in srgb, currentColor 8%, transparent);
+                         border:1px solid color-mix(in srgb, currentColor 18%, transparent); }
+          .fd-setup-go:hover { background:color-mix(in srgb, currentColor 16%, transparent); }
+          .fd-setup-link { display:flex; align-items:center; gap:6px; font-size:11px; flex-wrap:wrap; }
+          .fd-setup-link a { color:#3370FF; text-decoration:underline; word-break:break-all; }
+          .fd-setup-err { font-size:11px; color:#B42318; }
           .fd-jump { display:inline-flex; align-items:center; justify-content:center; flex:none;
                      width:22px; height:22px; padding:0; border-radius:50%; cursor:pointer;
                      color:inherit; opacity:.72;
@@ -850,6 +917,34 @@ window.__ModuleLoader__.load({
                 h('span', { style: { marginLeft: 'auto' } }, `${docs.length} 篇`),
               ),
               h('div', { className: 'fd-pop-body' },
+                doctor && doctor.items && doctor.items.some((entry) => entry.fix)
+                  ? h('div', { className: 'fd-setup' },
+                      h('div', { className: 'fd-setup-title' },
+                        `还差 ${doctor.items.filter((entry) => entry.fix).length} 项设置，完成才能显示完整信息`),
+                      doctor.items.filter((entry) => entry.fix).map((item) => h('div', { key: item.id, className: 'fd-setup-item' },
+                        h('span', { className: 'fd-setup-text', title: `${item.title}：${item.detail}` }, `${item.title}：${item.detail}`),
+                        item.fix.kind === 'command'
+                          ? h('button', {
+                              className: 'fd-setup-go', type: 'button',
+                              onClick: (e) => { e.preventDefault(); copyText(item.fix.command); flash(`已复制：${item.fix.command}`, 2600) },
+                            }, '复制命令')
+                          : h('button', {
+                              className: 'fd-setup-go', type: 'button',
+                              onClick: (e) => { e.preventDefault(); if (!authFlow.busy) startAuth(item.fix.scopes) },
+                            }, authFlow.busy ? '发起中…' : '去授权'),
+                      )),
+                      authFlow.url
+                        ? h('div', { className: 'fd-setup-link' },
+                            h('a', { href: authFlow.url, target: '_blank', rel: 'noreferrer' }, '打开授权页面'),
+                            h('button', {
+                              className: 'fd-setup-go', type: 'button',
+                              onClick: (e) => { e.preventDefault(); if (!authFlow.busy) finishAuth() },
+                            }, authFlow.busy ? '确认中…' : '我已授权'),
+                          )
+                        : null,
+                      authFlow.error ? h('div', { className: 'fd-setup-err' }, authFlow.error) : null,
+                    )
+                  : null,
                 docs.length === 0
                   ? h('div', { className: 'fd-pop-empty' },
                       data && data.error
@@ -874,21 +969,12 @@ window.__ModuleLoader__.load({
               ),
               h('div', { className: 'fd-pop-foot' },
                 h('span', { className: 'fd-pop-hint' },
-                  note || (doctor && doctor.missing && doctor.missing.length
-                    ? `数据为快照 · 缺少 ${doctor.missing.map((m) => m.cmd).join(' / ')}，无法重跑扫描器`
-                    : '点标题打开飞书，点 ⊙ 定位到该轮'),
+                  note || (doctor && doctor.items && doctor.items.some((entry) => entry.fix)
+                    ? `还差 ${doctor.items.filter((entry) => entry.fix).length} 项设置`
+                    : doctor && doctor.creatorNames && doctor.creatorNames !== 'ok'
+                      ? '创建者显示为 id：通讯录权限未授予'
+                      : '点标题打开飞书，点 ⊙ 定位到该轮'),
                 ),
-                doctor && doctor.missing && doctor.missing.length
-                  ? h('button', {
-                      className: 'fd-pop-setup', type: 'button',
-                      title: doctor.missing.map((m) => `${m.cmd}：${m.why}\n${m.hint}`).join('\n\n'),
-                      onClick: (e) => {
-                        e.preventDefault()
-                        copyText(doctor.missing.map((m) => `${m.cmd}\t${m.hint}`).join('\n'))
-                        flash('已复制安装命令')
-                      },
-                    }, '依赖')
-                  : null,
               ),
             )
           : null,
@@ -899,7 +985,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.0.5')
+        console.info('[feishu-docs] client apply, version 2.1.0')
         beacon('apply')
 
         try {

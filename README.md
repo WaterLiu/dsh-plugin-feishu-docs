@@ -44,6 +44,10 @@ The chip's host half reads the Session's own log — `~/.dsh/sessions/<project>/
 
 Bare URLs without a Markdown label fall back to their document token as the title until Feishu supplies the real one.
 
+## First run
+
+The popover lists whatever the machine still needs, with one action per item: copy the install command for a missing `zstd` or `lark-cli`, or press 去授权 to start the device-code login — it opens the Feishu authorization page and shows the same link, then finishes when you confirm. It asks only for the scopes this plugin reads (`drive:drive.metadata:readonly`, and `contact:user:search` for names). If the authorization lapses later, the same item reappears with a fresh link.
+
 ## Requires
 
 | | |

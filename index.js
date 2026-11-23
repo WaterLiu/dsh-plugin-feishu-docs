@@ -2,31 +2,24 @@
  * Host half of the Feishu documents chip.
  *
  * Answers one question per Session — "which Feishu documents do its messages
- * show?" — by reading that Session's own log. Nothing is precomputed, nothing is
- * configured: installing the bundle is the whole setup.
+ * show?" — by reading that Session's own log, then asks Feishu (through
+ * `lark-cli`) for what the log cannot know: the real title, the creator, and
+ * whether the document still exists.
  *
  * Routes:
- *   GET /x-feishu-docs/session.json?sid=<id>  the documents of one Session;
- *   GET /x-feishu-docs/doctor.json            whether this runtime can read logs.
+ *   GET  /x-feishu-docs/session.json?sid=<id>  the documents of one Session;
+ *   GET  /x-feishu-docs/doctor.json           what this machine still needs;
+ *   POST /x-feishu-docs/auth/start            begin a device-code login;
+ *   POST /x-feishu-docs/auth/finish           complete it.
  */
-import { execFile } from 'node:child_process'
-import zlib from 'node:zlib'
 import { readSession } from './scan.js'
-import { creatorStatus, enrichCreators, larkCli } from './owners.js'
+import { creatorStatus, enrichCreators } from './owners.js'
+import { diagnose, finishLogin, startLogin } from './setup.js'
 
 /** The web server owns the route table. */
 export const inject = ['webServer']
 
 const ROUTE = '/x-feishu-docs'
-
-/** `command -v` for one executable, through the login shell so PATH matches. */
-function which(cmd) {
-  return new Promise((done) => {
-    execFile('sh', ['-lc', `command -v ${cmd}`], (error, stdout) => {
-      done(!error && String(stdout).trim() ? String(stdout).trim() : null)
-    })
-  })
-}
 
 export function apply(ctx) {
   ctx.effect(() =>
@@ -42,17 +35,30 @@ export function apply(ctx) {
           })
 
         if (url.pathname.endsWith('/doctor.json')) {
-          const [fallbackCli, lark, creators] = await Promise.all([which('zstd'), larkCli(), creatorStatus()])
-          return json({
-            checkedAt: new Date().toISOString(),
-            zstd: typeof zlib.zstdDecompressSync === 'function' ? 'core' : fallbackCli ? 'cli' : null,
-            zstdPath: fallbackCli,
-            // Creators can only be filled in when this is not null.
-            larkCli: lark || null,
-            // Why an owner id is shown instead of a name, e.g. a missing scope.
-            creatorNames: creators.names || 'ok',
-            node: process.version,
-          })
+          const [report, creators] = await Promise.all([diagnose(), creatorStatus()])
+          // Why an owner id is shown instead of a name, e.g. a missing scope.
+          return json({ ...report, creatorNames: creators.names || 'ok' })
+        }
+
+        // The authorization routes change state, so they only accept a POST that
+        // the popover itself made: the custom header forces a preflight, which a
+        // foreign page cannot satisfy.
+        if (url.pathname.endsWith('/auth/start') || url.pathname.endsWith('/auth/finish')) {
+          if (request.method !== 'POST') return json({ error: 'POST only' }, 405)
+          if (request.headers.get('x-feishu-docs') !== 'popover') return json({ error: 'bad request' }, 400)
+          let body = {}
+          try {
+            body = await request.json()
+          } catch (error) {
+            return json({ error: 'invalid JSON body' }, 400)
+          }
+          try {
+            if (url.pathname.endsWith('/auth/start')) return json(await startLogin(body.scopes))
+            return json(await finishLogin(body.deviceCode))
+          } catch (error) {
+            ctx.logger?.warn?.(`feishu-docs: auth route failed: ${String(error)}`)
+            return json({ error: String(error) }, 500)
+          }
         }
 
         if (!url.pathname.endsWith('/session.json')) {
