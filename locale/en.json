@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Feishu documents",
+    "description": "Counts the Feishu documents this session touched in the header, and opens them by day with their creator and a jump to the turn.",
+    "detail": "docs/DETAIL.md"
+  }
+}

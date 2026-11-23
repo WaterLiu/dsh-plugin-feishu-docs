@@ -1,0 +1,49 @@
+{
+  "name": "dsh-plugin-feishu-docs",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Feishu documents of each Session, read from its own log: a header chip and a per-day popover with a jump to the turn.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "scan.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "docs",
+    "icon.svg",
+    "README.md",
+    "INSTALL.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
+    }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YOUR_NAME/dsh-plugin-feishu-docs.git"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "feishu",
+    "lark",
+    "documents"
+  ]
+}
