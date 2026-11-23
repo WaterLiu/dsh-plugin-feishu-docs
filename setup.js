@@ -18,8 +18,11 @@ import { invoke, larkCli, run } from './cli.js'
 /** Scopes this plugin cannot work without: document metadata, titles, owners. */
 const REQUIRED_SCOPES = ['drive:drive.metadata:readonly']
 
-/** Scopes that make the result nicer: a person's name instead of an owner id. */
-const NICE_SCOPES = ['contact:user:search']
+/**
+ * Scopes that make the result nicer rather than possible: a person's name
+ * instead of an owner id, and their avatar instead of an initial.
+ */
+const NICE_SCOPES = ['contact:user:search', 'contact:user.basic_profile:readonly']
 
 /** Run `command` through the login shell, matching how a GUI-started host finds tools. */
 function which(command) {
@@ -66,12 +69,21 @@ async function findAvatar(openId) {
   if (!openId) return ''
   const fresh = avatarCache.openId === openId && Date.now() - avatarCache.at < 5 * 60 * 1000
   if (fresh) return avatarCache.url
-  const answer = await invoke(['contact', '+get-user', '--as', 'user', '--user-id', openId], 5000)
-  const user = answer && answer.ok && answer.data && answer.data.user
-  const avatar = user && (typeof user.avatar === 'string'
-    ? user.avatar
-    : user.avatar && (user.avatar.avatar_240 || user.avatar.avatar_640 || user.avatar.avatar_72 || user.avatar.avatar_1920)) || ''
-  avatarCache = { openId, url: String(avatar || ''), at: Date.now() }
+  const pick = (avatar) => (typeof avatar === 'string'
+    ? avatar
+    : (avatar && (avatar.avatar_240 || avatar.avatar_640 || avatar.avatar_72 || avatar.avatar_1920)) || '')
+  let url = ''
+  // The user endpoint is the one that carries `avatar`; the contact shortcuts
+  // return names only.
+  const direct = await invoke(['api', 'GET', `/open-apis/contact/v3/users/${openId}`, '--as', 'user',
+    '--params', JSON.stringify({ user_id_type: 'open_id' })], 6000)
+  if (direct && direct.ok && direct.data && direct.data.user) url = pick(direct.data.user.avatar)
+  if (!url) {
+    const fallback = await invoke(['contact', '+get-user', '--as', 'user', '--user-id', openId], 5000)
+    const user = fallback && fallback.ok && fallback.data && fallback.data.user
+    if (user) url = pick(user.avatar)
+  }
+  avatarCache = { openId, url: String(url || ''), at: Date.now() }
   return avatarCache.url
 }
 

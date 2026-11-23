@@ -9,9 +9,10 @@
  * Routes:
  *   GET  /x-feishu-docs/session.json?sid=<id>  the documents of one Session;
  *   GET  /x-feishu-docs/doctor.json           what this machine still needs;
- *   POST /x-feishu-docs/auth/start            begin a device-code login;
- *   POST /x-feishu-docs/auth/finish           complete it;
- *   POST /x-feishu-docs/auth/logout           sign out.
+ *   GET  /x-feishu-docs/avatar?u=<url>        the signed-in user's avatar, proxied;
+ *   GET  /x-feishu-docs/auth/start?scopes=<csv>   begin a device-code login;
+ *   GET  /x-feishu-docs/auth/finish?device=<code> complete it;
+ *   GET  /x-feishu-docs/auth/logout               sign out.
  */
 import { readSession } from './scan.js'
 import { creatorStatus, enrichCreators } from './owners.js'
@@ -41,22 +42,48 @@ export function apply(ctx) {
           return json({ ...report, creatorNames: creators.names || 'ok' })
         }
 
-        // The authorization routes change state, so they only accept a POST that
-        // the popover itself made: the custom header forces a preflight, which a
-        // foreign page cannot satisfy.
-        if (url.pathname.endsWith('/auth/start') || url.pathname.endsWith('/auth/finish') || url.pathname.endsWith('/auth/logout')) {
-          if (request.method !== 'POST') return json({ error: 'POST only' }, 405)
-          if (request.headers.get('x-feishu-docs') !== 'popover') return json({ error: 'bad request' }, 400)
-          let body = {}
+        // Feishu hosts avatars on its own CDN. Serving it from here keeps the
+        // image same-origin, so a page policy cannot drop it, and the allowlist
+        // keeps this from becoming an open proxy.
+        if (url.pathname.endsWith('/avatar')) {
+          let target = null
           try {
-            body = await request.json()
+            target = new URL(String(url.searchParams.get('u') || ''))
           } catch (error) {
-            return json({ error: 'invalid JSON body' }, 400)
+            return json({ error: 'bad url' }, 400)
+          }
+          if (!/(^|\.)(feishu\.cn|larksuite\.com|larksuitecdn\.com|larkoffice\.com)$/i.test(target.hostname)) {
+            return json({ error: 'host not allowed' }, 400)
           }
           try {
-            if (url.pathname.endsWith('/auth/start')) return json(await startLogin(body.scopes))
+            const upstream = await fetch(target, { redirect: 'follow' })
+            if (!upstream.ok) return json({ error: `upstream ${upstream.status}` }, 502)
+            const type = upstream.headers.get('content-type') || ''
+            if (!type.startsWith('image/')) return json({ error: 'not an image' }, 415)
+            return new Response(upstream.body, {
+              status: 200,
+              headers: { 'content-type': type, 'cache-control': 'private, max-age=600' },
+            })
+          } catch (error) {
+            return json({ error: String(error) }, 502)
+          }
+        }
+
+        // The authorization routes change state. A resource route only ever sees
+        // GET and HEAD — every other method is answered 405 with an empty body by
+        // the web server, before this function runs — so the calls are GETs with
+        // query parameters, and the popover's custom header keeps a foreign page
+        // from driving them (it forces a preflight a cross-site request cannot pass).
+        if (url.pathname.endsWith('/auth/start') || url.pathname.endsWith('/auth/finish') || url.pathname.endsWith('/auth/logout')) {
+          if (request.headers.get('x-feishu-docs') !== 'popover') return json({ error: 'bad request' }, 400)
+          const scopes = String(url.searchParams.get('scopes') || '')
+            .split(',')
+            .map((scope) => scope.trim())
+            .filter(Boolean)
+          try {
+            if (url.pathname.endsWith('/auth/start')) return json(await startLogin(scopes))
             if (url.pathname.endsWith('/auth/logout')) return json(await logout())
-            return json(await finishLogin(body.deviceCode))
+            return json(await finishLogin(String(url.searchParams.get('device') || '')))
           } catch (error) {
             ctx.logger?.warn?.(`feishu-docs: auth route failed: ${String(error)}`)
             return json({ error: String(error) }, 500)

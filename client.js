@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.1', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.2', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.1', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.2', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -674,6 +674,22 @@ window.__ModuleLoader__.load({
      * Header chip plus its popover: the Session's documents, where the
      * conversation is, so no cross-Session navigation is involved.
      */
+    /**
+     * Read a JSON body without throwing.
+     *
+     * The host answers some requests with an empty body (a method it does not
+     * accept, a route mismatch), and `response.json()` turns that into a
+     * SyntaxError the user cannot act on.
+     */
+    async function readJson(response) {
+      const text = await response.text()
+      try {
+        return JSON.parse(text)
+      } catch (error) {
+        return { error: text ? `响应异常（HTTP ${response.status}）` : `响应为空（HTTP ${response.status}）` }
+      }
+    }
+
     /** One character for a user whose avatar Feishu would not hand over. */
     function initialOf(name) {
       const text = String(name || '').trim()
@@ -694,6 +710,7 @@ window.__ModuleLoader__.load({
       const [doctor, setDoctor] = useState(null)
       const [authFlow, setAuthFlow] = useState({ busy: false, url: '', deviceCode: '', error: '' })
       const [logoutAsk, setLogoutAsk] = useState(false)
+      const [avatarBroken, setAvatarBroken] = useState(false)
       const [open, setOpen] = useState(false)
       const [rect, setRect] = useState(null)
       const [note, setNote] = useState('')
@@ -723,11 +740,11 @@ window.__ModuleLoader__.load({
       const startAuth = async (scopes) => {
         setAuthFlow({ busy: true, url: '', deviceCode: '', error: '' })
         try {
-          const answer = await fetch('/x-feishu-docs/auth/start', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', 'x-feishu-docs': 'popover' },
-            body: JSON.stringify({ scopes }),
-          }).then((r) => r.json())
+          const wanted = Array.isArray(scopes) && scopes.length ? scopes.join(',') : ''
+          const answer = await readJson(await fetch(`/x-feishu-docs/auth/start?scopes=${encodeURIComponent(wanted)}`, {
+            headers: { 'x-feishu-docs': 'popover' },
+            cache: 'no-store',
+          }))
           if (!answer.url) {
             setAuthFlow({ busy: false, url: '', deviceCode: '', error: answer.error || '发起授权失败' })
             return
@@ -753,11 +770,10 @@ window.__ModuleLoader__.load({
         }
         setLogoutAsk(false)
         try {
-          const answer = await fetch('/x-feishu-docs/auth/logout', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', 'x-feishu-docs': 'popover' },
-            body: '{}',
-          }).then((r) => r.json())
+          const answer = await readJson(await fetch('/x-feishu-docs/auth/logout', {
+            headers: { 'x-feishu-docs': 'popover' },
+            cache: 'no-store',
+          }))
           if (!answer.ok) {
             flash(answer.error || '退出失败', 3200)
             return
@@ -774,11 +790,10 @@ window.__ModuleLoader__.load({
       const finishAuth = async () => {
         setAuthFlow((prev) => ({ ...prev, busy: true, error: '' }))
         try {
-          const answer = await fetch('/x-feishu-docs/auth/finish', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', 'x-feishu-docs': 'popover' },
-            body: JSON.stringify({ deviceCode: authFlow.deviceCode }),
-          }).then((r) => r.json())
+          const answer = await readJson(await fetch(`/x-feishu-docs/auth/finish?device=${encodeURIComponent(authFlow.deviceCode || '')}`, {
+            headers: { 'x-feishu-docs': 'popover' },
+            cache: 'no-store',
+          }))
           if (!answer.ok) {
             setAuthFlow((prev) => ({ ...prev, busy: false, error: answer.error || '授权未完成' }))
             return
@@ -802,6 +817,8 @@ window.__ModuleLoader__.load({
 
       const docs = useMemo(() => (data && data.docs) || [], [data])
       const user = (doctor && doctor.user) || {}
+      // A new account means the previous failure no longer applies.
+      useEffect(() => { setAvatarBroken(false) }, [user.avatar])
       /** Scopes to request from the avatar's login button, honouring the diagnosis. */
       const loginScopes = () => {
         const authItem = doctor && Array.isArray(doctor.items) && doctor.items.find((item) => item.id === 'auth')
@@ -986,8 +1003,13 @@ window.__ModuleLoader__.load({
           ? h('div', { ref: popRef, className: 'fd-pop', style: { top: `${rect.top}px`, right: `${rect.right}px` } },
               h('div', { className: 'fd-user' },
                 user.available
-                  ? (user.avatar
-                      ? h('img', { className: 'fd-user-avatar', src: user.avatar, alt: '' })
+                  ? (user.avatar && !avatarBroken
+                      ? h('img', {
+                          className: 'fd-user-avatar',
+                          src: `/x-feishu-docs/avatar?u=${encodeURIComponent(user.avatar)}`,
+                          alt: '',
+                          onError: () => setAvatarBroken(true),
+                        })
                       : h('div', { className: 'fd-user-avatar fd-user-initial' }, initialOf(user.name)))
                   // The avatar slot is the login entry when nobody is signed in:
                   // the one place a user looks for "who am I here".
@@ -1097,7 +1119,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.2.1')
+        console.info('[feishu-docs] client apply, version 2.2.2')
         beacon('apply')
 
         try {
