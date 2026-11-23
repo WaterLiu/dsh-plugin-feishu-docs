@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.6', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.9.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.6', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.9.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -356,14 +356,30 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** The row DSH rendered for one message id, when it is mounted. */
-    function rowByMessageId(mid) {
-      if (!mid) return null
-      try {
-        return document.querySelector(`[data-chat-node-key*="${mid}"], [data-chat-anchor-key*="${mid}"]`)
-      } catch (error) {
-        return null
+    /**
+     * The row DSH rendered for one message, when it is mounted.
+     *
+     * `data-chat-node-id` and `data-chat-seq` are what this plugin asks DSH to
+     * expose (see `contrib/upstream-data-chat-node-id.md`); until that lands, the
+     * router key and the turn are the only identifiers a row carries, so both are
+     * tried. Forward-compatible by construction: the extra attributes simply make
+     * the first selector succeed.
+     */
+    function rowByMessageId(mid, seq) {
+      if (!mid && seq == null) return null
+      const selectors = []
+      if (mid) selectors.push(`[data-chat-node-id="${mid}"]`)
+      if (seq != null) selectors.push(`[data-chat-seq="${seq}"]`)
+      if (mid) selectors.push(`[data-chat-node-key*="${mid}"]`, `[data-chat-anchor-key*="${mid}"]`)
+      for (const selector of selectors) {
+        try {
+          const found = document.querySelector(selector)
+          if (found) return found
+        } catch (error) {
+          /* an invalid selector is not fatal: try the next one */
+        }
       }
+      return null
     }
 
     
@@ -431,7 +447,7 @@ window.__ModuleLoader__.load({
       }
 
       // 1. The exact message that first showed it, by message id.
-      const first = rowByMessageId(doc && doc.mid)
+      const first = rowByMessageId(doc && doc.mid, doc && doc.seq)
       if (first) {
         const anchor = [...first.querySelectorAll('a[href]')].find(holds)
         if (anchor) return anchor
@@ -743,7 +759,7 @@ window.__ModuleLoader__.load({
       }
 
       // Already loaded: the row key may name it, otherwise the turn does.
-      const ready = rowByMessageId(doc.mid) || findTurnRow(doc.turn)
+      const ready = rowByMessageId(doc.mid, doc.seq) || findTurnRow(doc.turn)
       if (ready) return anchorInTurn() || ready
 
       // Page older history until the recorded turn is mounted.
@@ -751,7 +767,7 @@ window.__ModuleLoader__.load({
         onProgress?.(attempt + 1)
         const more = await loadOlderOnce()
         await new Promise((resolve) => window.setTimeout(resolve, 200))
-        const row = rowByMessageId(doc.mid) || findTurnRow(doc.turn)
+        const row = rowByMessageId(doc.mid, doc.seq) || findTurnRow(doc.turn)
         if (row) {
           report('jump-first-found', { attempt: attempt + 1, mid: Boolean(doc.mid), viaTurn: Boolean(findTurnRow(doc.turn)) })
           return anchorInTurn() || row

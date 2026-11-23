@@ -38,6 +38,12 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 退出只清除本机的飞书登录态，不动你的文档。退出后浮层会立刻变成「未登录飞书」，并出现「去授权」，重新授权一次即可恢复创建者、真实标题和删除标记。
 
+## 更快的跳转取决于 DSH 的一个属性
+
+聊天行目前只带 `data-chat-node-key` 和 `data-chat-turn`，没有消息 id；而它背后的视图节点其实有 `id` 和 `anchorSeq`。要让跳转"一次到位、不用翻历史"，需要 DSH 在行上多输出两个属性——具体位置、改动内容和风险见 [`contrib/upstream-data-chat-node-id.md`](contrib/upstream-data-chat-node-id.md)。
+
+插件**已提前兼容**：先找 `[data-chat-node-id]`，再找 `[data-chat-seq]`，都没有才退回"轮次 + 按需翻历史"。所以上游一加上，跳转速度立刻变快，插件不需要再改。
+
 ## 已知修复（上游遗留）
 
 `lark-cli` 之外，作者原版 `client.js` 里还有一个潜伏 bug：`loadOlderOnce()` 调用了 `nudgeTop()`，但**这个函数从未定义**——只有"需要翻更早历史"的路径才会踩到，平时感觉不到。本仓库已补上实现（把聊天区滚到顶部触发它自己的无限滚动），同时补回了被删掉的 `scrollerFor()`。
@@ -122,7 +128,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.8.6
+[feishu-docs] client apply, version 2.9.0
 [feishu-docs] header chip registered
 ```
 

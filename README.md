@@ -52,6 +52,10 @@ The popover opens with the signed-in Feishu account: avatar (or an initial), nam
 
 The popover lists whatever the machine still needs, with one action per item: copy the install command for a missing `zstd` or `lark-cli`, or press 去授权 to start the device-code login — it opens the Feishu authorization page and shows the same link, then finishes when you confirm. It asks only for the scopes this plugin reads (`drive:drive.metadata:readonly`, and `contact:user:search` for names). If the authorization lapses later, the same item reappears with a fresh link.
 
+## Faster jumps need one attribute from DSH
+
+A chat row carries `data-chat-node-key` and `data-chat-turn`, but not the message id — while the view node behind it has `id` and `anchorSeq`. `contrib/upstream-data-chat-node-id.md` describes the two-attribute change that would let a jump land on the exact message with no history paging. The popover already honours them: `data-chat-node-id` and `data-chat-seq` are tried first, and the recorded turn is the fallback until they exist.
+
 ## Requires
 
 | | |

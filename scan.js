@@ -348,6 +348,7 @@ function applyLines(entry, chunk) {
     // The message's own id: the client finds the exact row with it, which `turn`
     // cannot promise once a document is mentioned many times.
     const messageId = (data.message && data.message.id) || ''
+    const messageSeq = typeof record.seq === 'number' ? record.seq : null
     for (const hit of docsInText(text)) {
       const key = `${hit.kind}/${hit.token}`
       const seen = entry.docs.get(key)
@@ -359,6 +360,7 @@ function applyLines(entry, chunk) {
       entry.docs.set(key, {
         k: key,
         mid: messageId,
+        seq: messageSeq,
         t: hit.title,
         ty: KIND[hit.kind] || hit.kind,
         // Keep the URL the message used: tenants differ, so it must not be rebuilt.
