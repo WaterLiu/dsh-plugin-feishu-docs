@@ -40,7 +40,7 @@
   },
   "plugins": [
     {
-      "name": "dsh-plugin-feishu-docs",
+      "name": "dsh-feishu-docs",
       "title": {
         "en": "Feishu documents",
         "zh": "飞书云文档"
@@ -50,9 +50,9 @@
         "zh": "会话标题栏的 ☁ 胶囊，列出该会话消息中出现的飞书文档，含创建者并可跳转到对应轮次。"
       },
       "author": "your-name",
-      "homepage": "https://github.com/bytedance/dsh-plugin-feishu-docs",
+      "homepage": "https://github.com/WaterLiu/dsh-feishu-docs",
       "repository": {
-        "url": "https://github.com/bytedance/dsh-plugin-feishu-docs"
+        "url": "https://github.com/WaterLiu/dsh-feishu-docs"
       },
       "metadata": {
         "category": "documents",
@@ -70,11 +70,11 @@
       "versions": [
         {
           "version": "2.0.0",
-          "publishTimestamp": 1795442570,
+          "publishTimestamp": 1795446249,
           "source": {
             "type": "git",
-            "url": "https://github.com/bytedance/dsh-plugin-feishu-docs",
-            "commit": "419c3da0e728194832be18d5c3bfc28da16007f7",
+            "url": "https://github.com/WaterLiu/dsh-feishu-docs",
+            "commit": "033025acec208da94b1841ebac0b81273384b7d1",
             "path": "."
           },
           "engines": {

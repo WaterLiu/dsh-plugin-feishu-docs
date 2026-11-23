@@ -28,18 +28,18 @@ DSH 有两个层面，容易混：
 data/plugins/<owner>__<repo>.yml
 ```
 
-例：`data/plugins/bytedance__dsh-plugin-feishu-docs.yml`
+例：`data/plugins/WaterLiu__dsh-feishu-docs.yml`
 
-内容（`dist/market-entry.yml` 已备好，把 `OWNER` 换成你的 GitHub 账号）：
+内容（`market-entry.yml` 已按 `WaterLiu/dsh-feishu-docs` 填好）：
 
 ```yaml
-url: https://github.com/OWNER/dsh-plugin-feishu-docs
-name: OWNER/dsh-plugin-feishu-docs
+url: https://github.com/WaterLiu/dsh-feishu-docs
+name: WaterLiu/dsh-feishu-docs
 category: docs
 description:
   en: Lists the Feishu documents a session's own messages mention, behind a header chip, with each document's creator and a jump back to the turn it appeared in.
   zh: 在会话标题栏显示一个胶囊，列出该会话消息中出现过的飞书云文档，含创建者，并可跳回该文档出现的那一轮。
-icon: https://raw.githubusercontent.com/OWNER/dsh-plugin-feishu-docs/main/assets/icon-180.png
+icon: https://raw.githubusercontent.com/WaterLiu/dsh-plugin-feishu-docs/main/assets/icon-180.png
 ```
 
 规则要点：
@@ -73,16 +73,15 @@ icon: https://raw.githubusercontent.com/OWNER/dsh-plugin-feishu-docs/main/assets
 #    Settings → Topics → 加 `dsh-plugin`
 
 # 2. fork + clone 列表仓库
-git clone https://github.com/OWNER/awesome-dsh-plugin.git
+git clone https://github.com/WaterLiu/awesome-dsh-plugin.git
 cd awesome-dsh-plugin
 
 # 3. 放条目文件
-cp /path/to/dist/market-entry.yml data/plugins/OWNER__dsh-plugin-feishu-docs.yml
-#    把里面的 OWNER 换成你的账号
+cp /path/to/dist/market-entry.yml data/plugins/WaterLiu__dsh-feishu-docs.yml
 
 # 4. 提 PR
 git checkout -b add-feishu-docs
-git add data/plugins/OWNER__dsh-plugin-feishu-docs.yml
+git add data/plugins/WaterLiu__dsh-feishu-docs.yml
 git commit -m "Add dsh-plugin-feishu-docs"
 git push origin add-feishu-docs
 ```
@@ -125,7 +124,7 @@ git push origin add-feishu-docs
 - [ ] 仓库加了 `dsh-plugin` topic
 - [ ] 仓库创建满 1 天
 - [ ] `assets/icon-180.png` 已提交（PNG 不是 SVG）
-- [ ] 条目文件里 `OWNER` 全部替换
+- [x] 条目文件已按 `WaterLiu/dsh-feishu-docs` 填好
 - [ ] `url` 与仓库地址逐字符一致
 - [ ] `description.en` 以句号结尾、无营销词、与代码一致
 - [ ] PR 只加了这 1 个文件，没动 README
