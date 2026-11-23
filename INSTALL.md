@@ -38,6 +38,10 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 退出只清除本机的飞书登录态，不动你的文档。退出后浮层会立刻变成「未登录飞书」，并出现「去授权」，重新授权一次即可恢复创建者、真实标题和删除标记。
 
+## 已知修复（上游遗留）
+
+`lark-cli` 之外，作者原版 `client.js` 里还有一个潜伏 bug：`loadOlderOnce()` 调用了 `nudgeTop()`，但**这个函数从未定义**——只有"需要翻更早历史"的路径才会踩到，平时感觉不到。本仓库已补上实现（把聊天区滚到顶部触发它自己的无限滚动），同时补回了被删掉的 `scrollerFor()`。
+
 ## 跳转没反应时怎么查
 
 跳转的每一步都会写一行追踪日志到 `~/.dsh/feishu-docs-log.ndjson`（超过 512 KiB 自动轮转成 `.1`）。真正排障时先看它：
@@ -116,7 +120,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.8.1
+[feishu-docs] client apply, version 2.8.2
 [feishu-docs] header chip registered
 ```
 

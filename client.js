@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.2', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.2', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -529,6 +529,39 @@ window.__ModuleLoader__.load({
      * @param row - the visible element to centre.
      * @returns whether the container ended up moving.
      */
+    /** The nearest scrollable ancestor of a row, else the transcript itself. */
+    function scrollerFor(row) {
+      let parent = row && row.parentElement
+      for (let depth = 0; parent && depth < 12; depth += 1) {
+        if (parent.scrollHeight > parent.clientHeight + 4) return parent
+        parent = parent.parentElement
+      }
+      return transcript()
+    }
+
+    /**
+     * Nudge the transcript to its top so the app's own infinite scroll loads more.
+     *
+     * The last resort in {@link loadOlderOnce}: upstream called this without ever
+     * defining it, so paging history threw `nudgeTop is not defined` — the path only
+     * reached when a jump has to load older messages.
+     *
+     * @returns whether anything moved.
+     */
+    function nudgeTop() {
+      const scroller = transcript()
+      if (!scroller) return false
+      const before = scroller.scrollTop
+      try {
+        scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
+      } catch (error) {
+        /* no WheelEvent in this engine */
+      }
+      scroller.scrollTop = 0
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
+      return Math.abs(scroller.scrollTop - before) > 2
+    }
+
     /**
      * Scroll one element into the middle of the transcript.
      *
@@ -651,16 +684,7 @@ window.__ModuleLoader__.load({
     /** Sessions whose history has already been paged to the top. */
     const pagedToTop = new Set()
 
-    /** The earliest mounted link for a token, in document order. */
-    function earliestLink(token) {
-      if (!token) return null
-      const root = transcript() || document
-      return [...root.querySelectorAll('a[href]')].find((el) => {
-        const href = el.getAttribute('href') || ''
-        return href.includes(token) || (el.textContent || '').includes(token)
-      }) || null
-    }
-
+    
     /**
      * Bring the first mention of a document into the DOM.
      *
@@ -698,8 +722,9 @@ window.__ModuleLoader__.load({
         report('jump-paged', { sessionId, reachedTop })
       }
 
-      const token = String((doc && doc.u) || '').split('/').pop()
-      return rowByMessageId(doc.mid) || findTurnRow(doc.turn) || earliestLink(token)
+      // After paging to the start, "first in document order" is the first mention
+      // by definition — and `docElement` also handles a mention rendered as text.
+      return rowByMessageId(doc.mid) || findTurnRow(doc.turn) || docElement(doc)
     }
 
     function copyText(text) {
