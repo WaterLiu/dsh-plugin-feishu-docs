@@ -55,5 +55,5 @@ curl -s "http://127.0.0.1:<端口>/x-feishu-docs/session.json?sid=<会话id>"
 | 胶囊不出现 | 重启 DSH；在 Plugins 页确认该 bundle 已启用 |
 | 显示 `☁ 0` | 这个会话确实没出现过飞书链接 |
 | `doctor.json` 里 `zstd: null` | Node 版本低于 22.15 且没装 `zstd` 命令 → `brew install zstd` |
-| 标题是一串 token | 那条消息里是裸链接、没有 Markdown 文字，无法取到标题 |
+| 标题是一串 token | 那条消息里没给可用的标题文字（裸链接，或只有 `## 🔗` 这类标记），无法取到标题 |
 | 跳转位置不准 | 依赖历史是否已加载；插件会先自动向上翻页 |

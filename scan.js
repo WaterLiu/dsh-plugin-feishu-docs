@@ -3,91 +3,131 @@
  *
  * Everything the popover shows comes from here, so the bundle needs no index
  * file, no script, and no credentials: install it and it works on whatever
- * Sessions already exist on the machine.
+ * Sessions already exist on the machine. Nothing leaves the machine — this file
+ * opens one log, decompresses it, and matches links in message text.
  *
  * A Session's log is `~/.dsh/sessions/<project>/session-<id>/session.v4.jsonl.zstd`.
  * Node 22.15+ can decompress zstd in core; older runtimes fall back to the `zstd`
  * binary when it happens to be installed.
  */
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, basename } from 'node:path'
+import { basename, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import zlib from 'node:zlib'
 
 const SESSIONS_ROOT = join(homedir(), '.dsh', 'sessions')
+const LOG_NAME = 'session.v4.jsonl.zstd'
 
-/** Document kinds a Feishu URL can name, and what the UI calls them. */
-const KIND_OF = {
-  docx: 'docx',
-  docs: 'docx',
-  sheets: 'sheet',
-  base: 'bitable',
-  wiki: 'wiki',
-  slides: 'slides',
-  mindnotes: 'mindnote',
-}
-
-/** `https://<host>/<kind>/<token>` — the only links that count as documents. */
+/** `https://<tenant>/<kind>/<token>` — the only links that count as documents. */
 const DOC_URL = /https:\/\/[^\s)\]"'<>]*?\/(docx|docs|sheets|base|wiki|slides|mindnotes)\/([A-Za-z0-9]{16,})/g
 
-/**
- * A title written next to a bare URL, as pasted lists usually do:
- * `1. 文档名 — https://…`, `- 文档名: https://…`, `文档名 https://…`.
- */
-/** Whether a candidate is a usable title rather than a truncated reference. */
-function validTitle(text) {
-  const t = String(text || '').trim()
-  if (t.length < 2 || t.length > 160) return false
-  if (/^(?:wiki|docx|docs|sheets?|base|slides|mindnotes)\//i.test(t)) return false
-  if (/(?:\.\.\.|…)$/.test(t)) return false
-  if (/^https?:/i.test(t)) return false
-  if (/^[A-Za-z0-9_-]{16,}$/.test(t)) return false
-  return true
-}
+/** URL segment → the kind the popover draws an icon for. */
+const KIND = { docx: 'docx', docs: 'docx', sheets: 'sheet', base: 'bitable', wiki: 'wiki', slides: 'slides', mindnotes: 'mindnote' }
 
-function titleFromLine(line, url) {
-  // Table rows put the title and the link in different cells: drop the links
-  // first, then keep the most descriptive remaining cell.
-  const withoutLinks = line.replace(/\[[^\]]*\]\([^)]*\)/g, ' ')
-  const cut = withoutLinks.replace(url, ' ')
-  const cleaned = cut
-    .replace(/https?:\/\/\S+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/^\s*(?:[-*•]|\d+[.)、])\s*/, '')
-    .replace(/^(?:DOCX|WIKI|SHEETS?|BASE|SLIDES|MINDNOTES)\s+/i, '')
-    .replace(/\s*\|\s*$/, '')
-    .replace(/[\s—–\-:：|,，、]+$/, '')
-    .replace(/^[\s—–\-:：|,，、]+/, '')
-    .replace(/[（(]\s*(?:wiki|docx|docs|sheet|sheets|base|slides)\s*[)）]/gi, '')
-    .trim()
-
-  let best = cleaned
-  if (cleaned.includes('|')) {
-    const cells = cleaned.split('|').map((cell) => cell.trim()).filter(Boolean)
-    best = cells.sort((a, b) => b.length - a.length)[0] || ''
-  }
-  best = best.replace(/^\s*\|+\s*|\s*\|+\s*$/g, '').trim()
-
-  if (best.length < 2 || best.length > 160) return ''
-  // A whole paragraph is not a title.
-  if (best.split(/\s+/).length > 16) return ''
-  return best
-}
-
-/** `[title](url)` — the title the message itself gave the link. */
-const MD_LINK = /\[([^\]\n]{1,200})\]\((https:\/\/[^\s)]+)\)/g
+/** `[label](url)` — a title the message gave the link itself. */
+const MD_LINK = /\[([^\]\n]{1,200})\]\((https?:\/\/[^\s)]+)\)/g
 
 /** Tool calls that create a document rather than merely mention one. */
-const CREATE_SIG = /workbook-create|workbook-import|\bdocs \+create|\bdrive \+import|\bbase \+app-create|\bslides \+create/
+const CREATE = /workbook-create|workbook-import|\bdocs \+create|\bdrive \+import|\bbase \+app-create|\bslides \+create/
+
+/* ------------------------------------------------------------------ titles */
+
+/** Drop the markup a line may wrap a link in, and its block marker. */
+function strip(text) {
+  return text
+    .replace(MD_LINK, ' ')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/\[[^\]]*\]\(?/g, ' ') // half a Markdown link, cut by the URL slice
+    .replace(/^\s*(?:#{1,6}\s*|>+\s*|[-*+•]\s+|\d+[.)、]\s*)+/, '')
+    .replace(/[*_`~]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s|,，、:：—–\-()]+|[\s|,，、:：—–\-()]+$/g, '')
+    .trim()
+}
+
+/**
+ * Whether a candidate reads like a title rather than a token, a URL, or prose.
+ *
+ * @param candidate - raw text.
+ * @param max - length ceiling: a declared `[label](url)` may be longer than a
+ *   title guessed from the surrounding line.
+ */
+function plausible(candidate, max = 60) {
+  const t = String(candidate ?? '').trim()
+  return t.length > 1
+    && t.length <= max
+    && /\p{L}|\p{N}/u.test(t) // "## 🔗", "→", " — " carry no letter and are never titles
+    && t.split(/\s+/).length <= 16 // a whole paragraph is not a title
+    && !/[。！？；]/.test(t) // a sentence is not a title
+    && !/^https?:/i.test(t)
+    && !/^(?:wiki|docx|docs|sheets?|base|slides|mindnotes)\//i.test(t)
+    && !/(?:\.\.\.|…)$/.test(t)
+    && !/^[A-Za-z0-9_-]{16,}$/.test(t)
+}
+
+/**
+ * The text that names a document on its line.
+ *
+ * Whatever sits beside the link — `1. 文档名 — https://…`, `- 文档名: https://…`,
+ * `文档名 https://…`, or a table row whose title lives in another cell — after
+ * dropping the link itself and its markup. Prose on either side is not a title.
+ *
+ * @param line - the whole line.
+ * @param url - the document URL on that line.
+ * @returns a title, or '' when the line names nothing usable.
+ */
+function titleOfLine(line, url) {
+  const at = line.indexOf(url)
+  if (at < 0) return ''
+  const before = bestCell(line.slice(0, at))
+  const after = bestCell(line.slice(at + url.length))
+  // A link with prose on both sides is a sentence about a document, not a label
+  // for it: "…即便出现了 <url> 这个链接" must not become the title.
+  if (before.length > 12 && after.length > 12) return ''
+  for (const candidate of [before, after]) if (plausible(candidate)) return candidate
+  return ''
+}
+
+/** The longest cell of one side of a line, with table pipes honoured. */
+function bestCell(side) {
+  const cells = side.split('|').map(strip).filter(Boolean)
+  return cells.sort((a, b) => b.length - a.length)[0] || ''
+}
+
+/** Token of a document URL, or '' when the URL names no document. */
+function tokenOf(url) {
+  const found = [...String(url).matchAll(DOC_URL)].pop()
+  return found ? found[2] : ''
+}
+
+/** Every document link in one message, each with the best title its line offers. */
+function docsInText(text) {
+  const hits = []
+  for (const line of text.split('\n')) {
+    const urls = [...line.matchAll(DOC_URL)]
+    if (!urls.length) continue
+
+    // `[label](url)` on this line, by token, so a bare URL beside it can still
+    // borrow the label the message gave.
+    const labels = new Map()
+    for (const link of line.matchAll(MD_LINK)) {
+      const token = tokenOf(link[2])
+      if (token) labels.set(token, link[1].trim())
+    }
+    for (const found of urls) {
+      const label = labels.get(found[2])
+      const title = plausible(label, 160) ? label.trim() : titleOfLine(line, found[0])
+      hits.push({ kind: found[1], token: found[2], url: found[0], title })
+    }
+  }
+  return hits
+}
+
+/* -------------------------------------------------------------------- log IO */
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
-
-/** Offset of the next zstd frame header at or after `from`, or -1. */
-function nextFrame(buffer, from) {
-  return buffer.indexOf(ZSTD_MAGIC, from)
-}
 
 /**
  * Decompress a Session log.
@@ -99,25 +139,20 @@ function nextFrame(buffer, from) {
  */
 function decodeFrames(buffer) {
   const parts = []
-  let pos = nextFrame(buffer, 0)
-  while (pos >= 0 && pos < buffer.length) {
+  for (let at = buffer.indexOf(ZSTD_MAGIC); at >= 0; at = buffer.indexOf(ZSTD_MAGIC, at + ZSTD_MAGIC.length)) {
     try {
-      parts.push(zlib.zstdDecompressSync(buffer.subarray(pos)).toString('utf8'))
+      parts.push(zlib.zstdDecompressSync(buffer.subarray(at)).toString('utf8'))
     } catch (error) {
       /* not a frame boundary; keep scanning */
     }
-    const following = nextFrame(buffer, pos + ZSTD_MAGIC.length)
-    if (following < 0) break
-    pos = following
   }
   return parts.join('')
 }
 
 /** Read the log: core zstd frame-by-frame, else the `zstd` binary. */
 async function decompress(path) {
-  const buffer = await readFile(path)
   if (typeof zlib.zstdDecompressSync === 'function') {
-    return decodeFrames(buffer)
+    return decodeFrames(await readFile(path))
   }
   return new Promise((resolve, reject) => {
     execFile('zstd', ['-dc', path], { maxBuffer: 512 * 1024 * 1024 }, (error, stdout) => {
@@ -130,39 +165,28 @@ async function decompress(path) {
 /** Find the log of one Session by id, tolerating a truncated id. */
 async function findLog(sessionId) {
   if (!existsSync(SESSIONS_ROOT)) return null
-  // Callers may pass either `session-<id>` or the bare id.
-  const wanted = String(sessionId).replace(/^session-/, '')
-  const projects = await readdir(SESSIONS_ROOT, { withFileTypes: true })
-  for (const project of projects) {
+  const wanted = `session-${String(sessionId).replace(/^session-/, '')}`
+  for (const project of await readdir(SESSIONS_ROOT, { withFileTypes: true })) {
     if (!project.isDirectory()) continue
-    const dir = join(SESSIONS_ROOT, project.name)
     let entries
     try {
-      entries = await readdir(dir, { withFileTypes: true })
+      entries = await readdir(join(SESSIONS_ROOT, project.name), { withFileTypes: true })
     } catch (error) {
       continue
     }
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.startsWith('session-')) continue
-      const id = entry.name.slice('session-'.length)
-      if (id !== wanted && !id.startsWith(wanted)) continue
-      const log = join(dir, entry.name, 'session.v4.jsonl.zstd')
-      if (existsSync(log)) return { log, project: project.name, id }
-    }
+    const hit = entries.find((entry) => entry.isDirectory() && entry.name.startsWith(wanted))
+    if (!hit) continue
+    const log = join(SESSIONS_ROOT, project.name, hit.name, LOG_NAME)
+    if (existsSync(log)) return { log, project: project.name, id: hit.name.slice('session-'.length) }
   }
   return null
 }
 
 /** Message text of either record shape (`data.message.content` or `data.content`). */
 function textOf(data) {
-  const message = data && typeof data.message === 'object' && data.message?.content ? data.message : data
-  const blocks = message?.content
+  const blocks = data?.message?.content ?? data?.content
   if (!Array.isArray(blocks)) return ''
-  let out = ''
-  for (const block of blocks) {
-    if (block && typeof block === 'object' && block.type === 'text') out += block.text || ''
-  }
-  return out
+  return blocks.filter((block) => block && block.type === 'text').map((block) => block.text || '').join('')
 }
 
 /** `YYYY-MM-DD` and `HH:mm` in the reader's zone. */
@@ -176,18 +200,21 @@ function stamp(ms) {
   }
 }
 
+/* ------------------------------------------------------------------ the scan */
+
 /**
  * Every document one Session's messages mention.
  *
  * Links that appear only inside tool output are ignored: the reader never saw
- * them as a message, so listing them would contradict what is on screen.
+ * them as a message, so listing them would contradict what is on screen. The
+ * exception is a create call, which marks the result as produced by DSH.
  *
  * @param sessionId - full or truncated Session id.
  * @returns `{ sessionId, project, docs }`, or null when the log is absent.
  */
 export async function readSession(sessionId) {
   if (!sessionId) return null
-  const found = await findLog(String(sessionId))
+  const found = await findLog(sessionId)
   if (!found) return null
 
   let raw
@@ -198,29 +225,8 @@ export async function readSession(sessionId) {
   }
 
   const docs = new Map()
-  const createdTokens = new Set()
-  let currentTurn = 0
-
-  const remember = (kind, token, title, when, turn, url) => {
-    const key = `${kind}/${token}`
-    const existing = docs.get(key)
-    if (existing) {
-      existing.count += 1
-      if (!existing.t && title) existing.t = title
-      return
-    }
-    const { d, hm } = stamp(when)
-    docs.set(key, {
-      t: title || '',
-      ty: KIND_OF[kind] || kind,
-      // Keep the URL the message used: tenants differ, so it must not be rebuilt.
-      u: url || '',
-      turn: turn || 0,
-      d,
-      hm,
-      count: 1,
-    })
-  }
+  const created = new Set()
+  let turn = 0
 
   for (const line of raw.split('\n')) {
     if (!line) continue
@@ -230,55 +236,41 @@ export async function readSession(sessionId) {
     } catch (error) {
       continue
     }
-    const type = record.type
     const data = record.data || {}
 
-    if (type === 'turn/start' && data.turn != null) {
-      currentTurn = data.turn
+    if (record.type === 'turn/start') {
+      if (data.turn != null) turn = data.turn
       continue
     }
 
-    if (type === 'tool/call') {
-      const args = data.arguments || ''
-      if (CREATE_SIG.test(args)) {
-        for (const match of String(args).matchAll(DOC_URL)) createdTokens.add(match[2])
-      }
+    if (record.type === 'tool/call') {
+      const args = String(data.arguments || '')
+      if (CREATE.test(args)) for (const hit of args.matchAll(DOC_URL)) created.add(hit[2])
       continue
     }
 
-    if (type !== 'user/message' && type !== 'assistant/message') continue
-
+    if (record.type !== 'user/message' && record.type !== 'assistant/message') continue
     const text = textOf(data)
     if (!text) continue
-    const turn = data.turn ?? currentTurn
-    const when = record.time
 
-    // Titles come from the message's own Markdown labels.
-    const titled = new Map()
-    for (const match of text.matchAll(MD_LINK)) {
-      const url = match[2]
-      const doc = [...url.matchAll(DOC_URL)].pop()
-      if (doc) titled.set(doc[2], match[1].trim())
-    }
-
-    // Bare URLs take their title from the line they sit on.
-    const lines = text.split('\n')
-    const lineTitle = new Map()
-    for (const line of lines) {
-      const urls = [...line.matchAll(DOC_URL)]
-      if (!urls.length) continue
-      for (const found of urls) {
-        if (lineTitle.has(found[2])) continue
-        const guess = titleFromLine(line, found[0])
-        if (guess) lineTitle.set(found[2], guess)
+    const atTurn = data.turn ?? turn
+    for (const hit of docsInText(text)) {
+      const key = `${hit.kind}/${hit.token}`
+      const seen = docs.get(key)
+      if (seen) {
+        seen.count += 1
+        if (!seen.t && hit.title) seen.t = hit.title
+        continue
       }
-    }
-
-    for (const match of text.matchAll(DOC_URL)) {
-      const label = titled.get(match[2])
-      const fallback = lineTitle.get(match[2])
-      const title = validTitle(label) ? label : validTitle(fallback) ? fallback : ''
-      remember(match[1], match[2], title, when, turn, match[0])
+      docs.set(key, {
+        t: hit.title,
+        ty: KIND[hit.kind] || hit.kind,
+        // Keep the URL the message used: tenants differ, so it must not be rebuilt.
+        u: hit.url,
+        turn: atTurn || 0,
+        ...stamp(record.time),
+        count: 1,
+      })
     }
   }
 
@@ -286,9 +278,9 @@ export async function readSession(sessionId) {
     const token = doc.u.split('/').pop()
     return {
       ...doc,
-      t: doc.t || token,
-      new: createdTokens.has(token),
-      by: '',
+      t: doc.t || token, // a doc the text never named shows its token, not an empty row
+      new: created.has(token),
+      by: '', // creator needs a Feishu lookup; the plugin stays offline
       mid: '',
       cid: '',
     }
@@ -296,213 +288,4 @@ export async function readSession(sessionId) {
   list.sort((a, b) => (a.turn || 0) - (b.turn || 0))
 
   return { sessionId: found.id, project: basename(found.project), docs: list }
-}
-
-const TITLE_CACHE = join(homedir(), '.dsh', 'feishu-docs-titles.json')
-const OWNER_CACHE = join(homedir(), '.dsh', 'feishu-docs-owners.json')
-
-/** The document kind as the drive meta API names it. */
-const META_TYPE = { docx: 'docx', sheet: 'sheet', bitable: 'bitable', slides: 'slides', wiki: 'wiki', mindnote: 'mindnote' }
-
-/** Titles resolved from Feishu, so a token is only ever shown once. */
-async function loadTitleCache() {
-  try {
-    return JSON.parse(await readFile(TITLE_CACHE, 'utf8'))
-  } catch (error) {
-    return {}
-  }
-}
-
-async function saveTitleCache(cache) {
-  try {
-    await writeFile(TITLE_CACHE, JSON.stringify(cache, null, 1))
-  } catch (error) {
-    /* a cache that cannot be written only costs one extra lookup */
-  }
-}
-
-/** Ask the CLI for one document's real title. */
-function fetchTitle(url) {
-  return new Promise((done) => {
-    execFile('lark-cli', ['drive', '+inspect', '--as', 'user', '--url', url],
-      { timeout: 4000, env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1' } },
-      (error, stdout) => {
-        if (error) return done(null)
-        try {
-          const title = (JSON.parse(stdout).data || {}).title
-          done(title && String(title).trim() ? String(title).trim() : null)
-        } catch (parseError) {
-          done(null)
-        }
-      })
-  })
-}
-
-/**
- * Replace guessed titles with the documents' real ones.
- *
- * The heuristic in this file reads the title out of the message text, which is
- * usually right and costs nothing. When it is not — a bare URL, a truncated
- * label — the authoritative title comes from Feishu, once, through the CLI, and
- * is cached for every later open.
- *
- * @param entries - documents from {@link readSession}; mutated in place.
- * @returns the same array.
- */
-export async function enrichTitles(entries) {
-  const needs = entries.filter((doc) => !validTitle(doc.t) || doc.t === doc.u.split('/').pop())
-  if (!needs.length) return entries
-
-  const cache = await loadTitleCache()
-  const pending = []
-  for (const doc of needs) {
-    const token = doc.u.split('/').pop()
-    if (cache[token]) {
-      doc.t = cache[token]
-      continue
-    }
-    pending.push(doc)
-  }
-  if (!pending.length) return entries
-
-  const resolved = await Promise.all(pending.map(async (doc) => {
-    const title = await fetchTitle(doc.u)
-    if (!title) return false
-    doc.t = title
-    cache[doc.u.split('/').pop()] = title
-    return true
-  }))
-  if (resolved.some(Boolean)) await saveTitleCache(cache)
-  return entries
-}
-
-/** Run `task` over `items`, never more than `limit` at a time. */
-async function mapLimit(items, limit, task) {
-  const results = new Array(items.length)
-  let cursor = 0
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor++
-      results[index] = await task(items[index], index)
-    }
-  })
-  await Promise.all(workers)
-  return results
-}
-
-/** Run the CLI with JSON output; resolves null instead of throwing. */
-function cli(args, timeout = 5000) {
-  return new Promise((done) => {
-    execFile('lark-cli', args,
-      { timeout, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } },
-      (error, stdout) => {
-        if (error) return done(null)
-        try {
-          const parsed = JSON.parse(stdout)
-          done(parsed && parsed.ok ? parsed.data : null)
-        } catch (parseError) {
-          done(null)
-        }
-      })
-  })
-}
-
-/** The signed-in person, so their own documents read as a name rather than "他人". */
-let selfOpenIdPromise = null
-function selfOpenId() {
-  if (!selfOpenIdPromise) {
-    selfOpenIdPromise = cli(['api', 'GET', '/open-apis/authen/v1/user_info', '--as', 'user'])
-      .then((data) => (data && data.open_id) || '')
-      .catch(() => '')
-  }
-  return selfOpenIdPromise
-}
-
-/**
- * Fill in each document's creator.
- *
- * Owners come from one batch meta query for the whole list; names from the
- * contact API, one call per distinct person, both cached by token/person so a
- * Session opened twice costs a single read.
- *
- * @param entries - documents from {@link readSession}; `by` is set in place.
- * @returns the same array.
- */
-export async function enrichOwners(entries) {
-  const needs = entries.filter((doc) => !doc.by)
-  if (!needs.length) return entries
-
-  let cache
-  try {
-    cache = JSON.parse(await readFile(OWNER_CACHE, 'utf8'))
-  } catch (error) {
-    cache = {}
-  }
-
-  const unresolved = needs.filter((doc) => !(cache[doc.u.split('/').pop()] || {}).owner)
-  const wiki = unresolved.filter((doc) => doc.ty === 'wiki')
-  const other = unresolved.filter((doc) => doc.ty !== 'wiki')
-
-  if (other.length) {
-    const request = other.map((doc) => ({
-      doc_token: doc.u.split('/').pop(),
-      doc_type: META_TYPE[doc.ty] || 'docx',
-    }))
-    const meta = await cli(['api', 'POST', '/open-apis/drive/v1/metas/batch_query', '--as', 'user',
-      '--data', JSON.stringify({ request_docs: request, with_url: false })], 12000)
-    for (const item of (meta && meta.metas) || []) {
-      // Cache only real answers: an empty row would suppress every later retry.
-      if (item.doc_token && item.owner_id) cache[item.doc_token] = { owner: item.owner_id }
-    }
-  }
-
-  // A wiki node keeps its owner on the node, not in the drive meta answer.
-  // Feishu rate-limits a burst of CLI calls, so these run a few at a time.
-  await mapLimit(wiki, 3, async (doc) => {
-    const token = doc.u.split('/').pop()
-    const node = await cli(['api', 'GET', '/open-apis/wiki/v2/spaces/get_node', '--as', 'user',
-      '--params', JSON.stringify({ token })], 6000)
-    const owner = (node && node.node && (node.node.owner || node.node.creator)) || ''
-    if (owner) cache[token] = { owner }
-  })
-
-  // Names, one lookup per distinct owner.
-  const self = await selfOpenId()
-  const owners = [...new Set(Object.values(cache).map((row) => row && row.owner).filter(Boolean))]
-  const named = new Map()
-  await mapLimit(owners, 3, async (owner) => {
-    const known = Object.values(cache).find((row) => row && row.owner === owner && row.name)
-    if (known) return named.set(owner, known.name)
-    const data = await cli(['contact', '+get-user', '--as', 'user', '--user-id', owner], 4000)
-    const name = (data && data.user && data.user.name) || ''
-    if (!name) return
-    named.set(owner, name)
-    for (const row of Object.values(cache)) {
-      if (row && row.owner === owner) row.name = name
-    }
-  })
-
-  for (const doc of entries) {
-    const token = doc.u.split('/').pop()
-    const row = cache[token]
-    if (doc.new) {
-      doc.by = 'DSH'
-      continue
-    }
-    if (!row || !row.owner) continue
-    if (row.owner === self) doc.by = row.name || '你'
-    else doc.by = row.name || named.get(row.owner) || ''
-  }
-
-  try {
-    await writeFile(OWNER_CACHE, JSON.stringify(cache, null, 1))
-  } catch (error) {
-    /* the cache is an optimisation only */
-  }
-  return entries
-}
-
-/** Whether this runtime can decompress a Session log at all. */
-export function canRead() {
-  return typeof zlib.zstdDecompressSync === 'function' || Boolean(process.env.PATH)
 }
