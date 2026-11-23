@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.6', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.7', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.6', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.7', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -339,15 +339,16 @@ window.__ModuleLoader__.load({
       try {
         const style = document.createElement('style')
         style.textContent = `
-          .fd-doc-hit { background: color-mix(in srgb, #FFB020 34%, transparent) !important;
-                        border-radius: 4px;
-                        box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 45%, transparent);
-                        transition: background .18s ease, box-shadow .18s ease; }
+          .fd-doc-hit { background: color-mix(in srgb, #FFB020 38%, transparent) !important;
+                        border-radius: 4px; box-decoration-break: clone;
+                        box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 50%, transparent);
+                        transition: background .35s ease, box-shadow .35s ease; }
           @keyframes fd-doc-hit-pulse {
-            from { box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 55%, transparent); }
-            to { box-shadow: 0 0 0 7px transparent; }
+            from { box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 60%, transparent); }
+            to { box-shadow: 0 0 0 8px transparent; }
           }
-          .fd-doc-hit[data-fresh] { animation: fd-doc-hit-pulse .85s ease-out 2; }
+          .fd-doc-hit[data-fresh] { animation: fd-doc-hit-pulse .8s ease-out 2; }
+          .fd-doc-hit[data-out] { background: transparent !important; box-shadow: 0 0 0 2px transparent; }
         `
         document.head.appendChild(style)
       } catch (error) {
@@ -372,10 +373,16 @@ window.__ModuleLoader__.load({
       }) || null
     }
 
-    /** The mark currently on screen, and the timer that keeps it there. */
+    /** The mark on screen, and the timers that put it there and take it away. */
     let marked = null
     let markTimer = null
+    let markHold = null
     let markKey = null
+
+    /** How long the mark stays once it is on screen, and how long we hunt for it. */
+    const MARK_HOLD = 2000
+    const MARK_LOOK = 4000
+    const MARK_FADE = 380
 
     /** Remove the mark; safe to call when there is none. */
     function clearDocMark() {
@@ -383,9 +390,14 @@ window.__ModuleLoader__.load({
         window.clearInterval(markTimer)
         markTimer = null
       }
+      if (markHold) {
+        window.clearTimeout(markHold)
+        markHold = null
+      }
       for (const el of document.querySelectorAll('.fd-doc-hit')) {
         el.classList.remove('fd-doc-hit')
         delete el.dataset.fresh
+        delete el.dataset.out
       }
       if (markKey) {
         window.removeEventListener('keydown', markKey, true)
@@ -394,11 +406,20 @@ window.__ModuleLoader__.load({
       marked = null
     }
 
+    /** Fade the mark out, then forget it. */
+    function fadeDocMark() {
+      for (const el of document.querySelectorAll('.fd-doc-hit')) el.dataset.out = ''
+      markHold = window.setTimeout(clearDocMark, MARK_FADE)
+    }
+
     /**
      * Highlight the document inside the message it appears in.
      *
-     * The message list re-renders as the Session grows, which replaces nodes, so
-     * the mark is re-applied on a timer instead of being set once.
+     * The message list is virtualised: right after a jump the target is often not
+     * mounted yet, which is why the first click used to do nothing while the
+     * second worked. So the hunt keeps going for a few seconds, and only then
+     * gives up with a trace entry. Once found, the mark stays {@link MARK_HOLD}
+     * and fades out.
      *
      * @param doc - the document the jump targeted.
      */
@@ -406,36 +427,44 @@ window.__ModuleLoader__.load({
       clearDocMark()
       ensureMarkStyles()
 
+      const token = String((doc && doc.u) || '').split('/').pop()
+      const deadline = Date.now() + MARK_LOOK
       let reported = false
-      const paint = () => {
-        // Re-resolve only when the previous target is gone: the walk is cheap but
-        // not free, and re-running it on every tick would make scrolling stutter.
+
+      const settle = () => {
+        if (markTimer) {
+          window.clearInterval(markTimer)
+          markTimer = null
+        }
+        if (!markHold) markHold = window.setTimeout(fadeDocMark, MARK_HOLD)
+      }
+
+      const tick = () => {
         if (marked && marked.isConnected && marked.classList.contains('fd-doc-hit')) {
-          marked.dataset.fresh = ''
+          settle()
           return
         }
         const node = docNode(doc)
-        if (!node) {
-          if (!reported) {
-            reported = true
-            report('mark-miss', { token: String((doc && doc.u) || '').split('/').pop(), turn: doc && doc.turn })
-          }
-          return
-        }
-        if (!reported) {
-          reported = true
-          report('mark', { token: String((doc && doc.u) || '').split('/').pop(), tag: node.tagName, turn: doc && doc.turn })
-        }
-        if (node !== marked) {
+        if (node) {
           for (const el of document.querySelectorAll('.fd-doc-hit')) el.classList.remove('fd-doc-hit')
           marked = node
+          node.classList.add('fd-doc-hit')
           node.dataset.fresh = ''
+          if (!reported) {
+            reported = true
+            report('mark', { token, tag: node.tagName, turn: doc && doc.turn })
+          }
+          settle()
+          return
         }
-        node.classList.add('fd-doc-hit')
+        if (Date.now() > deadline) {
+          if (!reported) report('mark-miss', { token, turn: doc && doc.turn })
+          clearDocMark()
+        }
       }
 
-      paint()
-      markTimer = window.setInterval(paint, 400)
+      tick()
+      if (!markHold) markTimer = window.setInterval(tick, 250)
 
       const onKey = (event) => {
         if (event.key === 'Escape') clearDocMark()
@@ -500,7 +529,6 @@ window.__ModuleLoader__.load({
         isScroller: scroller === transcript(),
       })
 
-      if (doc) markDocument(doc)
       return moved
     }
 
@@ -1023,6 +1051,7 @@ window.__ModuleLoader__.load({
         const immediate = docNode(doc) || findTurnRow(doc.turn)
         if (immediate) {
           const moved = await revealRow(immediate, doc)
+          markDocument(doc)
           flash(moved ? `已定位到第 ${doc.turn} 轮` : `第 ${doc.turn} 轮已就位，但页面没能滚动`, 2600)
           return
         }
@@ -1037,6 +1066,7 @@ window.__ModuleLoader__.load({
         }
         if (row) {
           const moved = await revealRow(docNode(doc) || row, doc)
+          markDocument(doc)
           flash(moved ? `已定位到第 ${doc.turn} 轮` : `第 ${doc.turn} 轮已就位，但页面没能滚动`, 2600)
           return
         }
