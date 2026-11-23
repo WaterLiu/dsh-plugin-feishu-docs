@@ -3,14 +3,16 @@
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that lists the Feishu (Lark) documents each Session's messages show: a `☁ N` chip in the conversation header, and a popover grouped by day.
 
 ```
-现代汽车 RFP 要点总结   ⚙ 标准模式                ☁ 1   ▣  ⤢
-                                                    │
-                                    ┌───────────────┴────────────────┐
-                                    │ 本会话云文档              1 篇 │
-                                    ├────────────────────────────────┤
-                                    │ 11月16日                       │
-                                    │ 📊 现代合规云 RFP…  新建   ⊙   │
-                                    └────────────────────────────────┘
+Release notes for v1.2   ⚙ Standard                ☁ 2   ▣  ⤢
+                                                     │
+                                     ┌───────────────┴────────────────┐
+                                     │ Documents in this session   2  │
+                                     ├────────────────────────────────┤
+                                     │ Today                          │
+                                     │ 📄 API design notes   ⊙        │
+                                     │ Nov 12                         │
+                                     │ 📊 Roadmap 2027  New  ⊙        │
+                                     └────────────────────────────────┘
 ```
 
 Clicking `⊙` scrolls the transcript to that document's turn, paging older history in first when needed, and frames the whole turn until you interact.
