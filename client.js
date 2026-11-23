@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.3', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.4', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.3', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.4', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -811,9 +811,9 @@ window.__ModuleLoader__.load({
               afterAuth()
               return
             }
-            // A device code that cannot work any more is fatal; anything else is
-            // "keep waiting", which is the normal case until the user confirms.
-            if (/invalid|expired|not found/i.test(String(answer.error || ''))) {
+            // `pending` is the normal answer until the user confirms; a real
+            // error stops the loop and keeps the reason on screen.
+            if (answer.error) {
               setAuthFlow({ busy: false, url: '', deviceCode: '', error: String(answer.error) })
               return
             }
@@ -863,6 +863,11 @@ window.__ModuleLoader__.load({
             headers: { 'x-feishu-docs': 'popover' },
             cache: 'no-store',
           }))
+          if (!answer.ok && answer.pending) {
+            flash('还没收到授权，继续等待…', 2600)
+            if (authFlow.deviceCode) pollAuth(authFlow.deviceCode)
+            return
+          }
           if (!answer.ok) {
             setAuthFlow((prev) => ({ ...prev, busy: false, error: answer.error || '授权未完成' }))
             return
@@ -1015,7 +1020,8 @@ window.__ModuleLoader__.load({
           .fd-user-initial { display:flex; align-items:center; justify-content:center;
                              font-size:12.5px; font-weight:600; color:#fff;
                              background:linear-gradient(135deg, #3370FF, #7C4DFF); }
-          .fd-user-dim { color:#fff; background:color-mix(in srgb, currentColor 12%, transparent); }
+          .fd-user-dim { color:#8A9099; background:#EDEFF2;
+                         border:1px solid color-mix(in srgb, #8A9099 25%, transparent); }
           .fd-user-signin { flex:none; height:22px; padding:0 10px; border-radius:11px; cursor:pointer;
                             font:inherit; font-size:11px; color:#fff; background:#3370FF;
                             border:1px solid #3370FF; }
@@ -1085,7 +1091,7 @@ window.__ModuleLoader__.load({
                   h('div', { className: 'fd-user-sub' },
                     user.available
                       ? `${user.brand === 'lark' ? 'Lark' : '飞书'}个人用户`
-                      : '点左侧「登录」授权飞书'),
+                      : '点右侧「登录」授权飞书'),
                 ),
                 user.available
                   ? h('button', {
@@ -1109,6 +1115,24 @@ window.__ModuleLoader__.load({
                       onClick: (e) => { e.preventDefault(); if (!authFlow.busy) startAuth(loginScopes()) },
                     }, authFlow.busy ? '等待授权…' : '登录'),
               ),
+              doctor && doctor.items && doctor.items.some((entry) => entry.fix)
+                ? h('div', { className: 'fd-setup' },
+                    h('div', { className: 'fd-setup-title' },
+                      `还差 ${doctor.items.filter((entry) => entry.fix).length} 项设置，完成才能显示完整信息`),
+                    doctor.items.filter((entry) => entry.fix).map((item) => h('div', { key: item.id, className: 'fd-setup-item' },
+                      h('span', { className: 'fd-setup-text', title: `${item.title}：${item.detail}` }, `${item.title}：${item.detail}`),
+                      item.fix.kind === 'command'
+                        ? h('button', {
+                            className: 'fd-setup-go', type: 'button',
+                            onClick: (e) => { e.preventDefault(); copyText(item.fix.command); flash(`已复制：${item.fix.command}`, 2600) },
+                          }, '复制命令')
+                        : h('button', {
+                            className: 'fd-setup-go', type: 'button',
+                            onClick: (e) => { e.preventDefault(); if (!authFlow.busy) startAuth(item.fix.scopes) },
+                          }, authFlow.busy ? '发起中…' : '去授权'),
+                    )),
+                  )
+                : null,
               // The authorization link lives here, right under the account, so it
               // shows whether it came from the avatar's 登录 or from the panel.
               authFlow.url || authFlow.error
@@ -1130,24 +1154,6 @@ window.__ModuleLoader__.load({
                 h('span', { style: { marginLeft: 'auto' } }, `${docs.length} 篇`),
               ),
               h('div', { className: 'fd-pop-body' },
-                doctor && doctor.items && doctor.items.some((entry) => entry.fix)
-                  ? h('div', { className: 'fd-setup' },
-                      h('div', { className: 'fd-setup-title' },
-                        `还差 ${doctor.items.filter((entry) => entry.fix).length} 项设置，完成才能显示完整信息`),
-                      doctor.items.filter((entry) => entry.fix).map((item) => h('div', { key: item.id, className: 'fd-setup-item' },
-                        h('span', { className: 'fd-setup-text', title: `${item.title}：${item.detail}` }, `${item.title}：${item.detail}`),
-                        item.fix.kind === 'command'
-                          ? h('button', {
-                              className: 'fd-setup-go', type: 'button',
-                              onClick: (e) => { e.preventDefault(); copyText(item.fix.command); flash(`已复制：${item.fix.command}`, 2600) },
-                            }, '复制命令')
-                          : h('button', {
-                              className: 'fd-setup-go', type: 'button',
-                              onClick: (e) => { e.preventDefault(); if (!authFlow.busy) startAuth(item.fix.scopes) },
-                            }, authFlow.busy ? '发起中…' : '去授权'),
-                      )),
-                    )
-                  : null,
                 docs.length === 0
                   ? h('div', { className: 'fd-pop-empty' },
                       data && data.error
@@ -1188,7 +1194,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.2.3')
+        console.info('[feishu-docs] client apply, version 2.2.4')
         beacon('apply')
 
         try {

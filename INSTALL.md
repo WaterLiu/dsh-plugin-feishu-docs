@@ -20,7 +20,7 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 ## 首次使用
 
-第一次点开浮层，如果这台机器还缺东西，浮层顶部会直接列出**还差哪几项**，每项都给一个可点的动作：
+第一次点开浮层，如果这台机器还缺东西，「**还差哪几项**」会显示在「本会话云文档」标题**上方**，每项都给一个可点的动作：
 
 | 缺什么 | 面板上做什么 |
 |---|---|
@@ -65,7 +65,7 @@ lark-cli auth login --scope "contact:user:search contact:user.basic_profile:read
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.2.3
+[feishu-docs] client apply, version 2.2.4
 [feishu-docs] header chip registered
 ```
 

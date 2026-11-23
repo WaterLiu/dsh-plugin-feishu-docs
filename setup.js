@@ -13,7 +13,7 @@
 import { execFile } from 'node:child_process'
 import zlib from 'node:zlib'
 
-import { invoke, larkCli, run } from './cli.js'
+import { invoke, larkCli, run, why } from './cli.js'
 
 /** Scopes this plugin cannot work without: document metadata, titles, owners. */
 const REQUIRED_SCOPES = ['drive:drive.metadata:readonly']
@@ -23,6 +23,22 @@ const REQUIRED_SCOPES = ['drive:drive.metadata:readonly']
  * instead of an owner id, and their avatar instead of an initial.
  */
 const NICE_SCOPES = ['contact:user:search', 'contact:user.basic_profile:readonly']
+
+/**
+ * Device-flow completions still running in the background, by device code.
+ *
+ * The CLI blocks until the user authorizes, which can take minutes. Running that
+ * inside an HTTP request means the request times out first, and a killed exchange
+ * burns the one-time code — the popover then waits forever. So the wait lives
+ * here and the popover only asks for the outcome.
+ */
+const loginJobs = new Map()
+
+/** Forget completions nobody will ask about again. */
+function pruneJobs() {
+  const cutoff = Date.now() - 15 * 60 * 1000
+  for (const [code, job] of loginJobs) if (job.at < cutoff) loginJobs.delete(code)
+}
 
 /** Run `command` through the login shell, matching how a GUI-started host finds tools. */
 function which(command) {
@@ -173,8 +189,22 @@ export async function startLogin(scopes) {
   if (!answer) return { error: 'lark-cli 没有返回结果' }
   if (answer.ok === false) return { error: (answer.error && answer.error.message) || '发起授权失败' }
   const url = answer.verification_url || answer.verification_uri
-  if (!url) return { error: '没有拿到授权链接' }
-  return { url, deviceCode: answer.device_code || '', expiresIn: answer.expires_in || 600 }
+  const deviceCode = answer.device_code || ''
+  if (!url || !deviceCode) return { error: '没有拿到授权链接' }
+
+  pruneJobs()
+  loginJobs.set(deviceCode, { state: 'waiting', error: '', at: Date.now() })
+  run(['auth', 'login', '--device-code', deviceCode, '--json'], 6 * 60 * 1000).then((result) => {
+    const job = loginJobs.get(deviceCode) || { at: Date.now() }
+    if (result.code === 0 && (!result.envelope || result.envelope.ok !== false)) {
+      loginJobs.set(deviceCode, { ...job, state: 'ok', error: '', at: Date.now() })
+      return
+    }
+    const said = why(result.envelope) || result.text.split('\n').filter(Boolean).slice(-1)[0] || '授权失败'
+    loginJobs.set(deviceCode, { ...job, state: 'error', error: said, at: Date.now() })
+  })
+
+  return { url, deviceCode, expiresIn: answer.expires_in || 600 }
 }
 
 /**
@@ -200,10 +230,18 @@ export async function logout() {
  */
 export async function finishLogin(deviceCode) {
   if (!deviceCode) return { error: '缺少 device_code' }
-  // Short timeout on purpose: the CLI may block until the user authorizes, and
-  // the popover polls this, so a killed attempt must cost seconds, not minutes.
-  const answer = await invoke(['auth', 'login', '--device-code', deviceCode, '--json'], 8000)
-  if (!answer) return { error: 'lark-cli 没有返回结果' }
-  if (answer.ok === false) return { error: (answer.error && answer.error.message) || '授权尚未完成，请在浏览器里确认后重试' }
-  return { ok: true }
+
+  const job = loginJobs.get(deviceCode)
+  if (job) {
+    if (job.state === 'ok') return { ok: true }
+    if (job.state === 'error') return { error: job.error }
+    return { pending: true }
+  }
+
+  // No job for this code — the host restarted, or an older popover asked. Try
+  // once directly, and report "not yet" as pending rather than as a failure.
+  const answer = await invoke(['auth', 'login', '--device-code', deviceCode, '--json'], 10000)
+  if (answer && answer.ok) return { ok: true }
+  if (answer && answer.ok === false) return { error: why(answer) || '授权失败' }
+  return { pending: true }
 }
