@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.1', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.2', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.1', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.2', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -760,6 +760,32 @@ window.__ModuleLoader__.load({
       return text ? Array.from(text)[0].toUpperCase() : '飞'
     }
 
+    /**
+     * Wrap the parts of `text` that match `needle` in a <mark>.
+     *
+     * Index-based rather than regex-based so a query full of `.*+?` is matched
+     * literally, and `needle` arrives already lowercased by the caller.
+     *
+     * @param text - what the row displays.
+     * @param needle - lowercased query.
+     * @returns a string, or an array of strings and <mark> elements.
+     */
+    function highlight(text, needle) {
+      const raw = String(text || '')
+      if (!needle) return raw
+      const haystack = raw.toLowerCase()
+      if (!haystack.includes(needle)) return raw
+      const parts = []
+      let from = 0
+      for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, from)) {
+        if (at > from) parts.push(raw.slice(from, at))
+        parts.push(h('mark', { className: 'fd-hit', key: `hit-${at}` }, raw.slice(at, at + needle.length)))
+        from = at + needle.length
+      }
+      if (from < raw.length) parts.push(raw.slice(from))
+      return parts
+    }
+
     /** An unresolved owner is shown as its id, shortened so it cannot eat the row. */
     function shortBy(by) {
       const text = String(by || '')
@@ -1110,6 +1136,8 @@ window.__ModuleLoader__.load({
                       font-size:11px; color:inherit; opacity:.7; background:transparent; border:0; }
           .fd-clear:hover { opacity:1; text-decoration:underline; }
           .fd-none { padding:16px 12px; text-align:center; font-size:11.5px; opacity:.5; }
+          .fd-hit { background:color-mix(in srgb, #FFB020 42%, transparent); color:inherit;
+                    border-radius:2px; padding:0 1px; }
           .fd-empty { display:flex; flex-direction:column; align-items:center; gap:5px;
                       padding:20px 18px 22px; text-align:center; }
           .fd-empty-icon { opacity:.26; }
@@ -1356,9 +1384,10 @@ window.__ModuleLoader__.load({
                     : null,
                   h('div', { className: d.deleted ? 'fd-pop-row fd-pop-gone' : 'fd-pop-row' },
                     h(TypeIcon, { type: d.ty }),
-                    h('a', { href: d.u, target: '_blank', rel: 'noreferrer', title: d.deleted ? `${d.t}（已删除）` : d.t }, d.t),
+                    h('a', { href: d.u, target: '_blank', rel: 'noreferrer', title: d.deleted ? `${d.t}（已删除）` : d.t },
+                      highlight(d.t, needle)),
                     d.deleted ? h('span', { className: 'fd-pop-del' }, '已删除') : null,
-                    d.by ? h('span', { className: 'fd-by', title: d.by }, shortBy(d.by)) : null,
+                    d.by ? h('span', { className: 'fd-by', title: d.by }, highlight(shortBy(d.by), needle)) : null,
                     d.new ? h('span', { className: 'fd-pop-new' }, '新建') : null,
                     h(JumpButton, { doc: d, onTrigger: () => go(d) }),
                   ),
@@ -1382,7 +1411,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.4.1')
+        console.info('[feishu-docs] client apply, version 2.4.2')
         beacon('apply')
 
         try {

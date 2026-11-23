@@ -47,6 +47,7 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 有文档时，浮层里会出现一个搜索框和「来自用户」筛选：
 
 - 搜索框匹配**标题、创建者、以及文档 URL 里的 token**（标题还没拉到时也能用 token 搜），大小写不敏感，输入即时过滤；按 Esc 清空
+- 命中的文字在列表里以**琥珀色高亮**标出（标题和创建者都会标）
 - 「来自用户」列出本会话真正出现过的创建者，选中即只看这个人的文档；没登录时没有创建者信息，这一栏自动隐藏
 - 有任何筛选时右侧出现「清除」，标题栏计数会显示 `匹配数 / 总数`
 - 切换会话会重置筛选条件
@@ -78,7 +79,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.4.1
+[feishu-docs] client apply, version 2.4.2
 [feishu-docs] header chip registered
 ```
 
