@@ -115,7 +115,7 @@ async function scan(docs) {
  *   `'unknown'`, because none of them mean the document is gone.
  */
 async function checkDocument(url) {
-  const parsed = await invoke(['drive', '+inspect', '--as', 'user', '--url', url], 6000)
+  const parsed = await invoke(['drive', '+inspect', '--as', 'user', '--url', url], 10000)
   if (!parsed) return { verdict: 'unknown', title: '' }
   if (parsed.ok) {
     const answer = parsed.data || {}
@@ -198,7 +198,10 @@ export async function enrichCreators(docs) {
     const row = cache.tokens[token]
     if (stale(row)) return true
     const nameless = !doc.t || doc.t === token
-    return nameless && !(row.title || row.noTitle || row.deleted)
+    // `noTitleAt` expires with the TTL: Feishu having no name for a document once
+    // is not a reason to stop asking forever.
+    const gaveUp = row.noTitleAt && Date.now() - row.noTitleAt < TTL
+    return nameless && !(row.title || gaveUp || row.deleted)
   })
 
   if (ask.length) {
@@ -214,7 +217,7 @@ export async function enrichCreators(docs) {
       row.title = title
       row.checkedAt = Date.now()
       delete row.deleted
-      delete row.noTitle
+      delete row.noTitleAt
     }
     for (const token of known) {
       const row = (cache.tokens[token] = cache.tokens[token] || {})
@@ -232,14 +235,16 @@ export async function enrichCreators(docs) {
       else if (verdict === 'exists') delete row.deleted
       if (title) {
         row.title = title
-        delete row.noTitle
-      } else if (verdict !== 'deleted') {
-        // Feishu answered and had no name for it: stop asking until the TTL.
-        row.noTitle = true
+        delete row.noTitleAt
+        row.checkedAt = Date.now()
+      } else if (verdict === 'exists') {
+        // Feishu answered — the document exists — and had no name for it: stop
+        // asking until the TTL.
+        row.noTitleAt = Date.now()
+        row.checkedAt = Date.now()
       }
-      // An unanswered probe keeps the previous verdict and waits out the TTL
-      // instead of being retried on every open.
-      row.checkedAt = Date.now()
+      // An unanswered probe (timeout, permission, network) changes nothing but
+      // the verdict it may have learned; it is retried on the next open.
     })
   }
 
