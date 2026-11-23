@@ -62,7 +62,7 @@ The popover lists whatever the machine still needs, with one action per item: co
 
 - **No cross-session jump** — DSH exposes no public session-switching API, so a document from another Session copies a citation instead.
 - **Creator and deletion state need `lark-cli`** — both come from Feishu through the CLI, using the signed-in user's own credentials. Without the CLI, or without a login, the creator stays empty and no document is marked deleted, rather than guessing.
-- **Creator *names* need a contact scope** — the owner id always arrives; turning it into a person's name needs `contact:user:search` (or `contact:user.basic_profile:readonly`). Without it the column shows the shortened owner id and `/x-feishu-docs/doctor.json` reports the reason in `creatorNames`. Grant it with `lark-cli auth login --scope "contact:user:search"`.
+- **Creator *names* need a contact scope** — the owner id always arrives; turning it into a person's name needs `contact:user:search`. The avatar needs no extra scope: it comes from `authen/v1/user_info`. Login asks only for what `auth check` reports as missing. Without it the column shows the shortened owner id and `/x-feishu-docs/doctor.json` reports the reason in `creatorNames`. Grant it with `lark-cli auth login --scope "contact:user:search"`.
 - **A deleted document stays listed** — the list is what the Session mentioned, not what Feishu still has. A document Feishu answers `not exist` for is kept, struck through and marked 已删除; `permission denied` is *not* deletion, so such a document stays unmarked.
 - **Only messages count, not tool output** — a link buried in a tool result is deliberately invisible here.
 - **Turn jump depends on loaded history** — it pages back before falling back to copying the location.

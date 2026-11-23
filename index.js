@@ -52,7 +52,7 @@ export function apply(ctx) {
           } catch (error) {
             return json({ error: 'bad url' }, 400)
           }
-          if (!/(^|\.)(feishu\.cn|larksuite\.com|larksuitecdn\.com|larkoffice\.com)$/i.test(target.hostname)) {
+          if (!/(^|\.)(feishu\.cn|feishucdn\.com|larksuite\.com|larksuitecdn\.com|larkoffice\.com)$/i.test(target.hostname)) {
             return json({ error: 'host not allowed' }, 400)
           }
           try {

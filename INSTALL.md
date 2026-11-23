@@ -28,7 +28,7 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 | `lark-cli` | 「复制命令」→ `npm install -g @larksuite/cli` |
 | 飞书授权（未登录 / 权限不足） | 「去授权」→ 自动打开飞书授权页，并在面板里留一个「打开授权页面」链接；你在浏览器确认后点「我已授权」，浮层自动刷新 |
 
-授权只会申请这个插件真正读取的权限：`drive:drive.metadata:readonly`（标题、创建者、是否被删除）、`contact:user:search`（显示人名）和 `contact:user.basic_profile:readonly`（显示头像）。后两项只影响观感，没有也能用。**之后如果授权失效，再打开浮层会重新出现这一项，并给出新的授权链接**（设备码 10 分钟内有效，过期就再点一次「去授权」）。
+授权会先调 `lark-cli auth check` **和已授权的权限对比**，只申请**当前缺的那几个**——都齐了就不会出现授权项。插件真正读取的是两个 scope：`drive:drive.metadata:readonly`（标题、创建者、是否被删除）和 `contact:user:search`（显示人名，可选）。头像不需要额外权限（走 `authen/v1/user_info`）。**之后如果授权失效，再打开浮层会重新出现这一项，并给出新的授权链接**（设备码 10 分钟内有效，过期就再点一次「去授权」）。
 
 ## 当前账号与退出
 
@@ -50,13 +50,13 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 清单本身在本机完成，除了解压日志不做任何网络请求。**创建者**是唯一的例外：日志里没有这个信息，插件通过本机的 `lark-cli`（用你已登录的飞书身份）查一次，结果缓存到 `~/.dsh/feishu-docs-owners.json`。没装 `lark-cli` 或没登录时，该列留空，不会编造。
 
-**创建者名字**还需要通讯录权限：owner id 一定能拿到，但要显示成人名需要 `contact:user:search`（或 `contact:user.basic_profile:readonly`）。没授权时显示缩写的 owner id（如 `ou_cfa0a78…9e11`），原因写在 `curl …/doctor.json` 的 `creatorNames` 字段里。授权一次即可：
+**创建者名字**还需要通讯录权限：owner id 一定能拿到，但要显示成人名需要 `contact:user:search`。没授权时显示缩写的 owner id（如 `ou_cfa0a78…9e11`），原因写在 `curl …/doctor.json` 的 `creatorNames` 字段里。授权一次即可：
 
 ```bash
-lark-cli auth login --scope "contact:user:search contact:user.basic_profile:readonly"
+lark-cli auth login --scope "contact:user:search"
 ```
 
-（`basic_profile` 那一项是给**头像**用的；只要人名可以只授 `contact:user:search`。）
+
 
 **已删除**同理：先用一次批量元数据查询，飞书没返回的文档再逐个用 `drive +inspect` 确认，只有明确回答 `not exist` 才标记「已删除」（标题划掉，但仍留在列表里）。`permission denied` 不算删除，不会打标记。
 
@@ -65,7 +65,7 @@ lark-cli auth login --scope "contact:user:search contact:user.basic_profile:read
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.2.4
+[feishu-docs] client apply, version 2.2.5
 [feishu-docs] header chip registered
 ```
 

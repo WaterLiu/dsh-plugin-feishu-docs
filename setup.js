@@ -19,10 +19,11 @@ import { invoke, larkCli, run, why } from './cli.js'
 const REQUIRED_SCOPES = ['drive:drive.metadata:readonly']
 
 /**
- * Scopes that make the result nicer rather than possible: a person's name
- * instead of an owner id, and their avatar instead of an initial.
+ * Scopes that make the result nicer rather than possible: a colleague's name
+ * instead of an owner id. The signed-in user's avatar needs nothing extra — it
+ * comes from `authen/v1/user_info`, which the token already covers.
  */
-const NICE_SCOPES = ['contact:user:search', 'contact:user.basic_profile:readonly']
+const NICE_SCOPES = ['contact:user:search']
 
 /**
  * Device-flow completions still running in the background, by device code.
@@ -74,33 +75,27 @@ async function authState() {
 }
 
 /**
- * The signed-in user's avatar, or '' when Feishu will not give one.
+ * The signed-in user's avatar, and why it is missing when it is.
  *
- * The contact shortcuts do not expose an avatar, so this asks the raw user
- * endpoint, which needs a contact scope. A miss is cached for five minutes: the
- * account card falls back to an initial, and a granted scope shows up soon.
+ * `authen/v1/user_info` is the endpoint that carries it, and the token this
+ * plugin already needs covers it — the contact endpoints return names only, and
+ * `contact/v3/users/{id}` demands a legacy scope family. A miss is cached for
+ * five minutes, and the card falls back to an initial.
  */
-let avatarCache = { openId: '', url: '', at: 0 }
+let avatarCache = { openId: '', url: '', at: 0, error: '' }
 async function findAvatar(openId) {
-  if (!openId) return ''
-  const fresh = avatarCache.openId === openId && Date.now() - avatarCache.at < 5 * 60 * 1000
-  if (fresh) return avatarCache.url
-  const pick = (avatar) => (typeof avatar === 'string'
-    ? avatar
-    : (avatar && (avatar.avatar_240 || avatar.avatar_640 || avatar.avatar_72 || avatar.avatar_1920)) || '')
-  let url = ''
-  // The user endpoint is the one that carries `avatar`; the contact shortcuts
-  // return names only.
-  const direct = await invoke(['api', 'GET', `/open-apis/contact/v3/users/${openId}`, '--as', 'user',
-    '--params', JSON.stringify({ user_id_type: 'open_id' })], 6000)
-  if (direct && direct.ok && direct.data && direct.data.user) url = pick(direct.data.user.avatar)
-  if (!url) {
-    const fallback = await invoke(['contact', '+get-user', '--as', 'user', '--user-id', openId], 5000)
-    const user = fallback && fallback.ok && fallback.data && fallback.data.user
-    if (user) url = pick(user.avatar)
+  if (!openId) return { url: '', error: '' }
+  if (avatarCache.openId === openId && Date.now() - avatarCache.at < 5 * 60 * 1000) {
+    return { url: avatarCache.url, error: avatarCache.error }
   }
-  avatarCache = { openId, url: String(url || ''), at: Date.now() }
-  return avatarCache.url
+
+  const answer = await invoke(['api', 'GET', '/open-apis/authen/v1/user_info', '--as', 'user'], 6000)
+  const user = (answer && answer.ok && answer.data) || null
+  const url = (user && (user.avatar_middle || user.avatar_big || user.avatar_url || user.avatar_thumb)) || ''
+  const error = url ? '' : (answer && answer.ok ? 'user_info 没有返回 avatar 字段' : (why(answer) || 'user_info 调用失败'))
+
+  avatarCache = { openId, url: String(url || ''), at: Date.now(), error }
+  return { url: avatarCache.url, error: avatarCache.error }
 }
 
 /**
@@ -147,19 +142,24 @@ export async function diagnose() {
       detail,
       // One click starts the device flow, asking for exactly what is missing —
       // never the whole scope set the CLI could request.
-      fix: auth.available && !missingRequired.length && !missingNice.length ? null : {
+      // Ask only for what the token is actually missing: `auth check` already
+      // compared the granted scopes with ours. Only a signed-out machine asks for
+      // the whole set, because there is nothing to compare against.
+      fix: auth.available && !auth.missing.length ? null : {
         kind: 'auth',
-        scopes: [...new Set([...REQUIRED_SCOPES, ...NICE_SCOPES, ...auth.missing])],
+        scopes: auth.available ? [...new Set(auth.missing)] : [...REQUIRED_SCOPES, ...NICE_SCOPES],
       },
     })
   }
 
+  const avatar = auth.available ? await findAvatar(auth.openId) : { url: '', error: '' }
   const user = {
     available: auth.available,
     name: auth.userName,
     openId: auth.openId,
     brand: auth.brand,
-    avatar: auth.available ? await findAvatar(auth.openId) : '',
+    avatar: avatar.url,
+    avatarError: avatar.error || '',
   }
 
   return {

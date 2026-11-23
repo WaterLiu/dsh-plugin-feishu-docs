@@ -190,8 +190,16 @@ export async function enrichCreators(docs) {
 
   const cache = await loadCache()
   const stale = (row) => !row || !row.checkedAt || Date.now() - row.checkedAt > TTL
-  // A document is asked about when Feishu's answer about it is missing or old.
-  const ask = docs.filter((doc) => stale(cache.tokens[tokenOf(doc)]))
+  // A document is asked about when Feishu's answer about it is missing or old —
+  // and also when its title is still the token: a fresh owner answer says nothing
+  // about the title, so a cache hit must not skip that question.
+  const ask = docs.filter((doc) => {
+    const token = tokenOf(doc)
+    const row = cache.tokens[token]
+    if (stale(row)) return true
+    const nameless = !doc.t || doc.t === token
+    return nameless && !(row.title || row.noTitle || row.deleted)
+  })
 
   if (ask.length) {
     const { owners, titles, known } = await scan(ask)
@@ -206,6 +214,7 @@ export async function enrichCreators(docs) {
       row.title = title
       row.checkedAt = Date.now()
       delete row.deleted
+      delete row.noTitle
     }
     for (const token of known) {
       const row = (cache.tokens[token] = cache.tokens[token] || {})
@@ -221,7 +230,13 @@ export async function enrichCreators(docs) {
       const row = (cache.tokens[tokenOf(doc)] = cache.tokens[tokenOf(doc)] || {})
       if (verdict === 'deleted') row.deleted = true
       else if (verdict === 'exists') delete row.deleted
-      if (title) row.title = title
+      if (title) {
+        row.title = title
+        delete row.noTitle
+      } else if (verdict !== 'deleted') {
+        // Feishu answered and had no name for it: stop asking until the TTL.
+        row.noTitle = true
+      }
       // An unanswered probe keeps the previous verdict and waits out the TTL
       // instead of being retried on every open.
       row.checkedAt = Date.now()
