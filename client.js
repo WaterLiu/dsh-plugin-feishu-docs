@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.2', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.3', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.2', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.3', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -359,9 +359,17 @@ window.__ModuleLoader__.load({
     function docNode(doc) {
       const token = String((doc && doc.u) || '').split('/').pop()
       if (!token) return null
-      const turn = Number(doc && doc.turn)
-      const rows = turn ? [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)] : []
-      const scope = rows.length ? rows : [...document.querySelectorAll('[data-chat-turn]')]
+      // The token is unique to the document, so the whole transcript is the honest
+      // search space. Scoping to `[data-chat-turn="N"]` missed messages whose row
+      // carries a different turn than the one recorded in the log.
+      const links = [...document.querySelectorAll('a[href]')].filter(isVisibleRow)
+      const link = links.find((el) => {
+        const href = el.getAttribute('href') || ''
+        return href.includes(token) || (el.textContent || '').includes(token)
+      })
+      if (link) return link
+
+      const scope = [...document.querySelectorAll('[data-chat-turn]')].filter(isVisibleRow)
 
       // The link the message actually rendered is the best target: highlighting it
       // marks the document itself, and it scrolls with the message. Only visible
@@ -415,9 +423,20 @@ window.__ModuleLoader__.load({
       clearDocMark()
       ensureMarkStyles()
 
+      let reported = false
       const paint = () => {
         const node = docNode(doc)
-        if (!node) return
+        if (!node) {
+          if (!reported) {
+            reported = true
+            report('mark-miss', { token: String((doc && doc.u) || '').split('/').pop(), turn: doc && doc.turn })
+          }
+          return
+        }
+        if (!reported) {
+          reported = true
+          report('mark', { token: String((doc && doc.u) || '').split('/').pop(), tag: node.tagName, turn: doc && doc.turn })
+        }
         if (node !== marked) {
           for (const el of document.querySelectorAll('.fd-doc-hit')) el.classList.remove('fd-doc-hit')
           marked = node
@@ -1016,7 +1035,6 @@ window.__ModuleLoader__.load({
         // line the reader is looking for, not on the top of a long turn.
         const immediate = docNode(doc) || findTurnRow(doc.turn)
         if (immediate) {
-          setOpen(false)
           const moved = await revealRow(immediate, doc)
           flash(moved ? `已定位到第 ${doc.turn} 轮` : `第 ${doc.turn} 轮已就位，但页面没能滚动`, 2600)
           return
@@ -1031,7 +1049,6 @@ window.__ModuleLoader__.load({
           row = findTurnRow(doc.turn)
         }
         if (row) {
-          setOpen(false)
           const moved = await revealRow(docNode(doc) || row, doc)
           flash(moved ? `已定位到第 ${doc.turn} 轮` : `第 ${doc.turn} 轮已就位，但页面没能滚动`, 2600)
           return
