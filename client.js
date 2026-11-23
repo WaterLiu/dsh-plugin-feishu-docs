@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.7.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.7.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.7.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.7.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -456,17 +456,31 @@ window.__ModuleLoader__.load({
       if (!token) return null
       const root = transcript() || document
 
-      // The exact message first, when its row is mounted: it is the earliest
-      // mention by construction, and cheaper than walking every text node.
+      /** Is this box somewhere a reader can actually see it? */
+      const onScreen = (box) => box && box.height > 4 && box.width > 4
+        && box.bottom > 0 && box.top < window.innerHeight
+
+      // 1. The message that first showed it, by id: the earliest mention by
+      //    construction. Its row can still be off-screen when the jump's scroll
+      //    lost to a sticky layout, so the row is brought into view here.
       const first = rowByMessageId(doc && doc.mid)
       if (first) {
-        const box = first.getBoundingClientRect()
-        if (box.height > 4) {
-          const anchor = [...first.querySelectorAll('a[href]')].find((el) => (el.getAttribute('href') || '').includes(token))
-          return anchor ? anchor.getBoundingClientRect() : null
+        let box = first.getBoundingClientRect()
+        if (!onScreen(box)) {
+          try { first.scrollIntoView({ block: 'center', behavior: 'auto' }) } catch (error) { /* ignore */ }
+          box = first.getBoundingClientRect()
         }
+        const anchor = [...first.querySelectorAll('a[href]')]
+          .find((el) => (el.getAttribute('href') || '').includes(token))
+        const target = anchor || null
+        const rect = target ? target.getBoundingClientRect() : null
+        if (rect && onScreen(rect)) return rect
+        // The link may be inside a collapsed block: fall through to the walk.
       }
 
+      // 2. First mention in document order — message order — over text nodes. The
+      //    regex-free walk keeps code out and returns a tight rect for the token
+      //    itself, so the box is the width of the URL, not of the paragraph.
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const text = node.nodeValue || ''
@@ -475,27 +489,49 @@ window.__ModuleLoader__.load({
         const host = node.parentElement
         if (!host || host.closest('pre, code')) continue
         const link = host.closest('a[href]')
-        if (link) {
-          const box = link.getBoundingClientRect()
-          if (box.width > 4) return box
-        }
-        const range = document.createRange()
-        try {
-          range.setStart(node, at)
-          range.setEnd(node, at + token.length)
-        } catch (error) {
-          continue
-        }
-        const box = range.getBoundingClientRect()
-        if (box.width > 4 && box.height > 4) return box
+        const rect = (() => {
+          if (link) return link.getBoundingClientRect()
+          const range = document.createRange()
+          try {
+            range.setStart(node, at)
+            range.setEnd(node, at + token.length)
+          } catch (error) {
+            return null
+          }
+          return range.getBoundingClientRect()
+        })()
+        if (!rect || !onScreen(rect)) continue
+        return rect
       }
       return null
+    }
+
+    /**
+     * Would a reader see the document under this rect?
+     *
+     * A rect can be right in every coordinate and still sit on the wrong line — a
+     * stale layout, a sticky ancestor, a text node whose parent is positioned
+     * elsewhere. `elementFromPoint` answers the only question that matters: is the
+     * token actually there. The overlay is `pointer-events: none`, so this costs
+     * the page nothing.
+     */
+    function rectHoldsToken(box, token) {
+      const cx = box.left + box.width / 2
+      const cy = box.top + box.height / 2
+      if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) return false
+      const under = document.elementFromPoint(cx, cy)
+      if (!under) return false
+      if ((under.textContent || '').includes(token)) return true
+      const anchor = under.closest('a[href]')
+      return Boolean(anchor && (anchor.getAttribute('href') || '').includes(token))
     }
 
     /** Put the highlight where the document is, and keep it there while it moves. */
     function placeDocMark(doc) {
       const box = docRect(doc)
       if (!box) return false
+      const token = String((doc && doc.u) || '').split('/').pop()
+      if (!rectHoldsToken(box, token)) return false
       if (!markNode) {
         markNode = document.createElement('div')
         markNode.className = 'fd-doc-hl'
@@ -541,7 +577,10 @@ window.__ModuleLoader__.load({
             found = true
             if (!reported) {
               reported = true
-              report('mark', { token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
+              report('mark', {
+                token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid),
+                box: markNode ? `${Math.round(markNode.getBoundingClientRect().left)},${Math.round(markNode.getBoundingClientRect().top)}` : '',
+              })
             }
           }
           settle()
@@ -585,51 +624,63 @@ window.__ModuleLoader__.load({
      * @param row - the visible element to centre.
      * @returns whether the container ended up moving.
      */
+    /**
+     * Scroll one element into the middle of the transcript.
+     *
+     * Two candidate scrollers are tried in turn: the element DSH documents as the
+     * transcript (`[data-conversation-scroll]`), then the nearest scrollable
+     * ancestor of the row. Either can be the real one depending on the layout, and
+     * guessing wrong is what "第 N 轮已就位，但页面没能滚动" actually reported.
+     *
+     * @param row - the element to centre.
+     * @returns whether the page actually moved.
+     */
     async function revealRow(row, doc) {
-      // Always scroll the transcript itself. `scrollerFor` walks up to the nearest
-      // scrollable ancestor, which inside a code block is the block — a jump then
-      // nudges that instead of the conversation and appears to do nothing.
-      const scroller = transcript() || scrollerFor(row)
-      if (!scroller) return false
-
-      const before = scroller.scrollTop
-      try {
-        scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
-      } catch (error) {
-        /* no WheelEvent in this engine */
-      }
-
-      const centre = () => {
-        const box = row.getBoundingClientRect()
-        const port = scroller.getBoundingClientRect()
-        scroller.scrollTop += box.top - port.top + box.height / 2 - port.height / 2
-        scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
-      }
-
-      let attempts = []
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        centre()
-        await new Promise((resolve) => window.setTimeout(resolve, 90))
-        attempts.push(Math.round(scroller.scrollTop))
-        if (Math.abs(scroller.scrollTop - before) > 2) break
-        // Escalate: the browser's own scroll, then a hard assignment.
-        try { row.scrollIntoView({ block: 'center', behavior: 'auto' }) } catch (error) { /* ignore */ }
-        if (attempt === 2) {
+      const tryScroll = async (scroller) => {
+        if (!scroller) return false
+        const before = scroller.scrollTop
+        const centre = () => {
           const box = row.getBoundingClientRect()
           const port = scroller.getBoundingClientRect()
-          const target = scroller.scrollTop + (box.top - port.top) - port.height / 3
-          scroller.scrollTop = Math.max(0, Math.min(target, scroller.scrollHeight - scroller.clientHeight))
+          scroller.scrollTop += box.top - port.top + box.height / 2 - port.height / 2
+          scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
         }
+
+        const seen = []
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          centre()
+          await new Promise((resolve) => window.setTimeout(resolve, 90))
+          seen.push(Math.round(scroller.scrollTop))
+          if (Math.abs(scroller.scrollTop - before) > 2) break
+          // Escalate: the browser's own scroll, then a hard assignment.
+          try { row.scrollIntoView({ block: 'center', behavior: 'auto' }) } catch (error) { /* ignore */ }
+          if (attempt === 2) {
+            const box = row.getBoundingClientRect()
+            const port = scroller.getBoundingClientRect()
+            const target = scroller.scrollTop + (box.top - port.top) - port.height / 3
+            scroller.scrollTop = Math.max(0, Math.min(target, scroller.scrollHeight - scroller.clientHeight))
+          }
+        }
+
+        const moved = Math.abs(scroller.scrollTop - before) > 2
+        report('reveal', {
+          before: Math.round(before), after: Math.round(scroller.scrollTop), seen, moved,
+          rowHeight: Math.round(row.getBoundingClientRect().height),
+          isTranscript: scroller === transcript(),
+        })
+        return moved
       }
 
-      const moved = Math.abs(scroller.scrollTop - before) > 2
-      report('reveal', {
-        before: Math.round(before), after: Math.round(scroller.scrollTop),
-        attempts, moved, rowHeight: Math.round(row.getBoundingClientRect().height),
-        isScroller: scroller === transcript(),
-      })
+      const primary = transcript()
+      const fallback = scrollerFor(row)
+      if (!primary && !fallback) return false
+      if (await tryScroll(primary)) return true
+      if (fallback && fallback !== primary && await tryScroll(fallback)) return true
 
-      return moved
+      // Neither scrolled: the row may simply already be in place, which is not a
+      // failure. Report it as settled so the caller does not claim otherwise.
+      const box = row.getBoundingClientRect()
+      return box.height > 4 && box.bottom > 0 && box.top < window.innerHeight
     }
 
     /** The transcript's own "load earlier" control, when history remains. */
@@ -1150,9 +1201,9 @@ window.__ModuleLoader__.load({
         // line the reader is looking for, not on the top of a long turn.
         const immediate = rowByMessageId(doc.mid) || docNode(doc) || findTurnRow(doc.turn)
         if (immediate) {
-          const moved = await revealRow(immediate, doc)
+          await revealRow(immediate, doc)
           markDocument(doc)
-          flash(moved ? `已定位到第 ${doc.turn} 轮` : `第 ${doc.turn} 轮已就位，但页面没能滚动`, 2600)
+          flash(`已定位到第 ${doc.turn} 轮`, 2200)
           return
         }
 
@@ -1165,9 +1216,9 @@ window.__ModuleLoader__.load({
           row = findTurnRow(doc.turn)
         }
         if (row) {
-          const moved = await revealRow(docNode(doc) || row, doc)
+          await revealRow(docNode(doc) || row, doc)
           markDocument(doc)
-          flash(moved ? `已定位到第 ${doc.turn} 轮` : `第 ${doc.turn} 轮已就位，但页面没能滚动`, 2600)
+          flash(`已定位到第 ${doc.turn} 轮`, 2200)
           return
         }
         copyText(`${doc.t || ''} · 第 ${doc.turn || '?'} 轮 · ${doc.hm || ''}`)
