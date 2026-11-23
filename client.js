@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.7', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.8', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.7', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.8', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -366,11 +366,26 @@ window.__ModuleLoader__.load({
       // exactly what looked wrong. Anchors are searched in the transcript — not the
       // whole page, where this popover's own list would match first.
       const root = transcript() || document
-      const links = [...root.querySelectorAll('a[href]')].filter(isVisibleRow)
-      return links.find((el) => {
+      const matches = (el) => {
         const href = el.getAttribute('href') || ''
         return href.includes(token) || (el.textContent || '').includes(token)
-      }) || null
+      }
+      const visible = (el) => isVisibleRow(el)
+
+      // A document is usually mentioned several times. The list row belongs to the
+      // first mention (`doc.turn` is the turn it was first seen in), so that is the
+      // occurrence to jump to and to mark — not whichever copy happens to be on
+      // screen. `data-chat-turn` is not always in step with the log, so a miss
+      // falls back to any visible copy.
+      const turn = Number(doc && doc.turn)
+      if (turn) {
+        const rows = [...root.querySelectorAll(`[data-chat-turn="${turn}"]`)]
+        for (const row of rows) {
+          const hit = [...row.querySelectorAll('a[href]')].find((el) => visible(el) && matches(el))
+          if (hit) return hit
+        }
+      }
+      return [...root.querySelectorAll('a[href]')].find((el) => visible(el) && matches(el)) || null
     }
 
     /** The mark on screen, and the timers that put it there and take it away. */

@@ -56,6 +56,8 @@ tail -5 ~/.dsh/feishu-docs-log.ndjson
 
 不再画覆盖层，所以没有"框太大""盖住输入框"这类问题：高亮就是消息里的那个链接，跟着内容一起滚动。定位方式是**按 token 在聊天区里找那条可见的链接**（不依赖轮次属性，所以行上的轮次标记与日志不一致时也能找到）。搜索范围严格限定在聊天区，**不会命中插件自己列表里的链接**。
 
+**同一份文档在一个会话里往往出现很多次**（第一次介绍、后面复盘、再后来回填表格）。列表里只有一行，代表它**首次出现**的位置；跳转和高亮也只针对这第一次出现的消息，不会跳到后面某一处副本。
+
 高亮**只落在可点击的链接上**：代码块、反引号里的同名 URL 是日志文本，不参与高亮；如果某个会话里这份文档只以代码形式出现过，那就只滚过去、不做标记（并在 `feishu-docs-log.ndjson` 里记一条 `mark-miss`）。这也和"只有正文里可点的链接才算文档"是一致的。
 
 跳转后**浮层不会自动关闭**，你可以连着点几条对比；只有点击浮层外部或按 Esc 才关。
@@ -105,7 +107,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.5.7
+[feishu-docs] client apply, version 2.5.8
 [feishu-docs] header chip registered
 ```
 
