@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.7.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.7.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -339,17 +339,16 @@ window.__ModuleLoader__.load({
       try {
         const style = document.createElement('style')
         style.textContent = `
-          .fd-doc-hl { position: fixed; z-index: 65; pointer-events: none;
-                       border-radius: 4px;
-                       background: color-mix(in srgb, #FFB020 38%, transparent);
-                       box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 50%, transparent);
-                       transition: opacity .35s ease, background .35s ease; }
-          @keyframes fd-doc-hl-pulse {
+          .fd-doc-hit { background: color-mix(in srgb, #FFB020 38%, transparent) !important;
+                        border-radius: 4px; box-decoration-break: clone;
+                        box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 50%, transparent);
+                        transition: background .35s ease, box-shadow .35s ease; }
+          @keyframes fd-doc-hit-pulse {
             from { box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 60%, transparent); }
             to { box-shadow: 0 0 0 8px transparent; }
           }
-          .fd-doc-hl[data-fresh] { animation: fd-doc-hl-pulse .8s ease-out 2; }
-          .fd-doc-hl[data-out] { opacity: 0; }
+          .fd-doc-hit[data-fresh] { animation: fd-doc-hit-pulse .8s ease-out 2; }
+          .fd-doc-hit[data-out] { background: transparent !important; box-shadow: 0 0 0 2px transparent; }
         `
         document.head.appendChild(style)
       } catch (error) {
@@ -367,48 +366,11 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** The element inside the transcript that shows a document, or null. */
-    function docNode(doc) {
-      const token = String((doc && doc.u) || '').split('/').pop()
-      if (!token) return null
-
-      // Only a clickable link is a valid target: the document is what the reader
-      // can click, and marking a code-block line (the same URL as a log line) is
-      // exactly what looked wrong. Anchors are searched in the transcript — not the
-      // whole page, where this popover's own list would match first.
-      const root = transcript() || document
-      const matches = (el) => {
-        const href = el.getAttribute('href') || ''
-        return href.includes(token) || (el.textContent || '').includes(token)
-      }
-
-      // 1. The exact message that first showed it, by message id. A document is
-      //    usually mentioned many times, and the row in the list stands for the
-      //    first mention — so that is the one to mark, not a later copy.
-      const first = rowByMessageId(doc && doc.mid)
-      if (first) {
-        const hit = [...first.querySelectorAll('a[href]')].find(matches)
-        if (hit) return hit
-      }
-
-      // 2. Its turn, when the row keys do not carry the id we know.
-      const turn = Number(doc && doc.turn)
-      if (turn) {
-        for (const row of [...root.querySelectorAll(`[data-chat-turn="${turn}"]`)]) {
-          const hit = [...row.querySelectorAll('a[href]')].find((el) => isVisibleRow(el) && matches(el))
-          if (hit) return hit
-        }
-      }
-
-      // 3. Any visible copy: better a later mention than no answer at all.
-      return [...root.querySelectorAll('a[href]')].find((el) => isVisibleRow(el) && matches(el)) || null
-    }
-
-    /** The highlight element on screen, and the timers that place and retire it. */
-    let markNode = null
+    
+    /** The marked elements, and the timers that keep and retire the mark. */
+    let marked = []
     let markTimer = null
     let markHold = null
-    let markScroll = null
     let markKey = null
 
     /** How long the mark stays once it is on screen, and how long we hunt for it. */
@@ -416,7 +378,10 @@ window.__ModuleLoader__.load({
     const MARK_LOOK = 4000
     const MARK_FADE = 380
 
-    /** Remove the highlight and every listener it installed. */
+    /** A container this tall is a message, not the document inside it. */
+    const MARK_MAX_HEIGHT = 120
+
+    /** Remove the mark and every timer/listener it installed. */
     function clearDocMark() {
       if (markTimer) {
         window.clearInterval(markTimer)
@@ -426,131 +391,81 @@ window.__ModuleLoader__.load({
         window.clearTimeout(markHold)
         markHold = null
       }
-      if (markScroll) {
-        window.removeEventListener('scroll', markScroll, true)
-        markScroll = null
-      }
       if (markKey) {
         window.removeEventListener('keydown', markKey, true)
         markKey = null
       }
-      if (markNode) {
-        markNode.remove()
-        markNode = null
+      for (const el of marked) {
+        el.classList.remove('fd-doc-hit')
+        delete el.dataset.fresh
+        delete el.dataset.out
       }
+      // Anything a re-render duplicated keeps its class; sweep the document.
+      for (const el of document.querySelectorAll('.fd-doc-hit')) {
+        el.classList.remove('fd-doc-hit')
+        delete el.dataset.fresh
+        delete el.dataset.out
+      }
+      marked = []
     }
 
     /**
-     * Where the document first appears in the conversation, in viewport pixels.
+     * The element that shows a document, tight enough to paint.
      *
-     * The transcript is walked in document order — which is message order — over
-     * text nodes, so the *first* mention wins whether or not the renderer turned it
-     * into a link. Code is skipped: a URL inside a fence or backticks is a log
-     * line, not the document the chat shows.
+     * A link is the best target — it is the document, it is small, and it scrolls
+     * with the message, so no coordinates are involved at all. Without a link, the
+     * first text node holding the token is used, provided its parent is a line and
+     * not the whole message. Code is skipped: a URL inside a fence or backticks is
+     * a log line, not the document the chat shows.
      *
      * @param doc - the document the jump targeted.
-     * @returns a rect, or null when the document is not on screen right now.
+     * @returns an element, or null when nothing tight enough exists.
      */
-    function docRect(doc) {
+    function docElement(doc) {
       const token = String((doc && doc.u) || '').split('/').pop()
       if (!token) return null
       const root = transcript() || document
-
-      /** Is this box somewhere a reader can actually see it? */
-      const onScreen = (box) => box && box.height > 4 && box.width > 4
-        && box.bottom > 0 && box.top < window.innerHeight
-
-      // 1. The message that first showed it, by id: the earliest mention by
-      //    construction. Its row can still be off-screen when the jump's scroll
-      //    lost to a sticky layout, so the row is brought into view here.
-      const first = rowByMessageId(doc && doc.mid)
-      if (first) {
-        let box = first.getBoundingClientRect()
-        if (!onScreen(box)) {
-          try { first.scrollIntoView({ block: 'center', behavior: 'auto' }) } catch (error) { /* ignore */ }
-          box = first.getBoundingClientRect()
-        }
-        const anchor = [...first.querySelectorAll('a[href]')]
-          .find((el) => (el.getAttribute('href') || '').includes(token))
-        const target = anchor || null
-        const rect = target ? target.getBoundingClientRect() : null
-        if (rect && onScreen(rect)) return rect
-        // The link may be inside a collapsed block: fall through to the walk.
+      const holds = (el) => {
+        const href = el.getAttribute && el.getAttribute('href')
+        return Boolean((href && href.includes(token)) || (el.textContent || '').includes(token))
       }
 
-      // 2. First mention in document order — message order — over text nodes. The
-      //    regex-free walk keeps code out and returns a tight rect for the token
-      //    itself, so the box is the width of the URL, not of the paragraph.
+      // 1. The exact message that first showed it, by message id.
+      const first = rowByMessageId(doc && doc.mid)
+      if (first) {
+        const anchor = [...first.querySelectorAll('a[href]')].find(holds)
+        if (anchor) return anchor
+      }
+
+      // 2. Any link in the transcript, in document order (the earliest mention).
+      const link = [...root.querySelectorAll('a[href]')].find(holds)
+      if (link) return link
+
+      // 3. Text without a link: the line that carries it.
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        const text = node.nodeValue || ''
-        const at = text.indexOf(token)
-        if (at < 0) continue
+        if (!node.nodeValue || !node.nodeValue.includes(token)) continue
         const host = node.parentElement
         if (!host || host.closest('pre, code')) continue
-        const link = host.closest('a[href]')
-        const rect = (() => {
-          if (link) return link.getBoundingClientRect()
-          const range = document.createRange()
-          try {
-            range.setStart(node, at)
-            range.setEnd(node, at + token.length)
-          } catch (error) {
-            return null
-          }
-          return range.getBoundingClientRect()
-        })()
-        if (!rect || !onScreen(rect)) continue
-        return rect
+        const box = host.getBoundingClientRect()
+        if (box.height > MARK_MAX_HEIGHT || box.width < 4) continue
+        return host
       }
       return null
     }
 
-    /**
-     * Would a reader see the document under this rect?
-     *
-     * A rect can be right in every coordinate and still sit on the wrong line — a
-     * stale layout, a sticky ancestor, a text node whose parent is positioned
-     * elsewhere. `elementFromPoint` answers the only question that matters: is the
-     * token actually there. The overlay is `pointer-events: none`, so this costs
-     * the page nothing.
-     */
-    function rectHoldsToken(box, token) {
-      const cx = box.left + box.width / 2
-      const cy = box.top + box.height / 2
-      if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) return false
-      const under = document.elementFromPoint(cx, cy)
-      if (!under) return false
-      if ((under.textContent || '').includes(token)) return true
-      const anchor = under.closest('a[href]')
-      return Boolean(anchor && (anchor.getAttribute('href') || '').includes(token))
-    }
-
-    /** Put the highlight where the document is, and keep it there while it moves. */
-    function placeDocMark(doc) {
-      const box = docRect(doc)
-      if (!box) return false
-      const token = String((doc && doc.u) || '').split('/').pop()
-      if (!rectHoldsToken(box, token)) return false
-      if (!markNode) {
-        markNode = document.createElement('div')
-        markNode.className = 'fd-doc-hl'
-        markNode.dataset.fresh = ''
-        document.body.appendChild(markNode)
-      }
-      markNode.style.top = `${Math.round(box.top - 2)}px`
-      markNode.style.left = `${Math.round(box.left - 2)}px`
-      markNode.style.width = `${Math.round(box.width + 4)}px`
-      markNode.style.height = `${Math.round(box.height + 4)}px`
-      return true
+    /** Fade the mark out, then forget it. */
+    function fadeDocMark() {
+      for (const el of marked) el.dataset.out = ''
+      markHold = window.setTimeout(clearDocMark, MARK_FADE)
     }
 
     /**
      * Highlight the document inside the message it first appears in.
      *
-     * The list is virtualised, so right after a jump the target is often not
-     * mounted yet: the hunt runs every 250ms for four seconds before giving up.
-     * Once found, the mark stays {@link MARK_HOLD} and fades out.
+     * The mark is a class on the element itself, so it cannot drift away from the
+     * text: it moves with the message, survives scrolling, and needs no geometry.
+     * A re-render replaces the element, so the mark is re-applied while it is up.
      *
      * @param doc - the document the jump targeted.
      */
@@ -561,55 +476,45 @@ window.__ModuleLoader__.load({
       const token = String((doc && doc.u) || '').split('/').pop()
       const deadline = Date.now() + MARK_LOOK
       let reported = false
-      let found = false
+      let holding = false
 
-      const settle = () => {
-        if (markTimer) {
-          window.clearInterval(markTimer)
-          markTimer = null
-        }
-        if (!markHold) markHold = window.setTimeout(fadeDocMark, MARK_HOLD)
-      }
-
-      const tick = () => {
-        if (placeDocMark(doc)) {
-          if (!found) {
-            found = true
-            if (!reported) {
-              reported = true
-              report('mark', {
-                token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid),
-                box: markNode ? `${Math.round(markNode.getBoundingClientRect().left)},${Math.round(markNode.getBoundingClientRect().top)}` : '',
-              })
-            }
+      const paint = () => {
+        if (holding && marked.length && marked.every((el) => el.isConnected && el.classList.contains('fd-doc-hit'))) return
+        const el = docElement(doc)
+        if (!el) {
+          if (Date.now() > deadline) {
+            if (!reported) report('mark-miss', { token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
+            clearDocMark()
           }
-          settle()
           return
         }
-        if (Date.now() > deadline) {
-          if (!reported) report('mark-miss', { token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
-          clearDocMark()
+        if (!marked.includes(el)) marked.push(el)
+        // Marked but off-screen helps nobody: bring the element into view when the
+        // jump's own scroll did not manage it.
+        const box = el.getBoundingClientRect()
+        if (box.height > 4 && (box.bottom < 0 || box.top > window.innerHeight)) {
+          try { el.scrollIntoView({ block: 'center', behavior: 'auto' }) } catch (error) { /* ignore */ }
+        }
+        el.classList.add('fd-doc-hit')
+        if (!el.dataset.fresh) el.dataset.fresh = ''
+        if (!reported) {
+          reported = true
+          report('mark', { token, tag: el.tagName, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
+        }
+        if (!holding) {
+          holding = true
+          markHold = window.setTimeout(fadeDocMark, MARK_HOLD)
         }
       }
 
-      tick()
-      if (!found) markTimer = window.setInterval(tick, 250)
-
-      // Keep it glued to the text while the reader scrolls inside the two seconds.
-      markScroll = () => { if (found) placeDocMark(doc) }
-      window.addEventListener('scroll', markScroll, true)
+      paint()
+      markTimer = window.setInterval(paint, 250)
 
       const onKey = (event) => {
         if (event.key === 'Escape') clearDocMark()
       }
       markKey = onKey
       window.addEventListener('keydown', onKey, true)
-    }
-
-    /** Fade the highlight out, then remove it. */
-    function fadeDocMark() {
-      if (markNode) markNode.dataset.out = ''
-      markHold = window.setTimeout(clearDocMark, MARK_FADE)
     }
 
 
@@ -1199,7 +1104,7 @@ window.__ModuleLoader__.load({
       const jumpTo = async (doc) => {
         // The document's own node is the better scroll target: it lands on the
         // line the reader is looking for, not on the top of a long turn.
-        const immediate = rowByMessageId(doc.mid) || docNode(doc) || findTurnRow(doc.turn)
+        const immediate = rowByMessageId(doc.mid) || docElement(doc) || findTurnRow(doc.turn)
         if (immediate) {
           await revealRow(immediate, doc)
           markDocument(doc)
@@ -1216,7 +1121,7 @@ window.__ModuleLoader__.load({
           row = findTurnRow(doc.turn)
         }
         if (row) {
-          await revealRow(docNode(doc) || row, doc)
+          await revealRow(docElement(doc) || row, doc)
           markDocument(doc)
           flash(`已定位到第 ${doc.turn} 轮`, 2200)
           return
