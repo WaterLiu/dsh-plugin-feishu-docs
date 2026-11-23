@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.0.3', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.0.4', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.0.3', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.0.4', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -674,6 +674,13 @@ window.__ModuleLoader__.load({
      * Header chip plus its popover: the Session's documents, where the
      * conversation is, so no cross-Session navigation is involved.
      */
+    /** An unresolved owner is shown as its id, shortened so it cannot eat the row. */
+    function shortBy(by) {
+      const text = String(by || '')
+      if (!text.startsWith('ou_') || text.length <= 16) return text
+      return `${text.slice(0, 11)}…${text.slice(-4)}`
+    }
+
     function HeaderChip(props) {
       const fullId = String((props && (props.sessionId || (props.standard && props.standard.sessionId))) || '')
       const shortId = fullId.slice(0, 20)
@@ -859,7 +866,7 @@ window.__ModuleLoader__.load({
                     h(TypeIcon, { type: d.ty }),
                     h('a', { href: d.u, target: '_blank', rel: 'noreferrer', title: d.deleted ? `${d.t}（已删除）` : d.t }, d.t),
                     d.deleted ? h('span', { className: 'fd-pop-del' }, '已删除') : null,
-                    d.by ? h('span', { className: 'fd-by' }, d.by) : null,
+                    d.by ? h('span', { className: 'fd-by', title: d.by }, shortBy(d.by)) : null,
                     d.new ? h('span', { className: 'fd-pop-new' }, '新建') : null,
                     h(JumpButton, { doc: d, onTrigger: () => go(d) }),
                   ),
@@ -892,7 +899,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.0.3')
+        console.info('[feishu-docs] client apply, version 2.0.4')
         beacon('apply')
 
         try {

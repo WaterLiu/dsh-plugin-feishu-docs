@@ -100,9 +100,9 @@ async function mapLimit(items, limit, task) {
 async function loadCache() {
   try {
     const cache = JSON.parse(await readFile(CACHE, 'utf8'))
-    return { tokens: cache.tokens || {}, names: cache.names || {} }
+    return { tokens: cache.tokens || {}, names: cache.names || {}, failures: cache.failures || {} }
   } catch (error) {
-    return { tokens: {}, names: {} }
+    return { tokens: {}, names: {}, failures: {} }
   }
 }
 
@@ -118,14 +118,15 @@ async function saveCache(cache) {
 /**
  * Ask Feishu about the documents nobody has asked about yet.
  *
- * @returns `{ owners, known }` — owner ids by token, and the tokens Feishu
- *   accounted for at all. A token missing from `known` is either deleted or
- *   invisible, which the caller distinguishes by probing it.
+ * @returns `{ owners, titles, known }` — owner ids and real titles by token,
+ *   and the tokens Feishu accounted for at all. A token missing from `known` is
+ *   either deleted or invisible, which the caller distinguishes by probing it.
  */
 async function scan(docs) {
   const wiki = docs.filter((doc) => doc.ty === 'wiki')
   const rest = docs.filter((doc) => doc.ty !== 'wiki')
   const owners = new Map()
+  const titles = new Map()
   const known = new Set()
 
   if (rest.length) {
@@ -138,6 +139,8 @@ async function scan(docs) {
       if (!meta || !meta.doc_token) continue
       known.add(meta.doc_token)
       if (meta.owner_id) owners.set(meta.doc_token, meta.owner_id)
+      // The document's own name beats anything guessed from message text.
+      if (meta.title && String(meta.title).trim()) titles.set(meta.doc_token, String(meta.title).trim())
     }
   }
 
@@ -150,9 +153,10 @@ async function scan(docs) {
     const node = answer.node || {}
     const owner = node.owner || node.creator
     if (owner) owners.set(tokenOf(doc), owner)
+    if (node.title && String(node.title).trim()) titles.set(tokenOf(doc), String(node.title).trim())
   })
 
-  return { owners, known }
+  return { owners, titles, known }
 }
 
 /**
@@ -171,11 +175,62 @@ async function checkDocument(url) {
   return GONE.test(said) ? 'deleted' : 'unknown'
 }
 
-/** Display name for an owner id, or '' when Feishu does not give one. */
-async function findName(openId) {
-  const answer = await data(['contact', '+get-user', '--as', 'user', '--user-id', openId], 5000)
-  const user = answer && answer.user
-  return (user && (user.name || user.en_name)) || ''
+const nameOf = (user) => (user && (user.localized_name || user.name || user.en_name)) || ''
+
+/** Why a call failed, in one line, for the cache and for doctor.json. */
+function why(parsed) {
+  const error = (parsed && parsed.error) || {}
+  if (!error.message && !error.subtype) return ''
+  return `${error.subtype || error.type || 'error'}: ${String(error.message || '').slice(0, 160)}`
+}
+
+/**
+ * Display names for a set of owner ids.
+ *
+ * One batched `+search-user` asks for all of them at once (the shape user
+ * identity is meant to use); when that scope is missing, each id is retried with
+ * `+get-user`, which needs a different scope. Both failing is not an error worth
+ * failing the list for — the caller keeps the owner id it already has.
+ *
+ * @returns `{ names, error }` — names by owner id, and the reason none arrived.
+ */
+async function findNames(ownerIds) {
+  const names = new Map()
+  if (!ownerIds.length) return { names, error: '' }
+
+  const batched = await invoke(['contact', '+search-user', '--as', 'user', '--user-ids', ownerIds.slice(0, 100).join(',')], 10000)
+  if (batched && batched.ok) {
+    const users = (batched.data && (batched.data.users || batched.data.items)) || []
+    for (const user of users) {
+      const id = user.open_id || user.user_id
+      const name = nameOf(user)
+      if (id && name && name !== id) names.set(id, name)
+    }
+    if (names.size) return { names, error: '' }
+  }
+
+  let error = why(batched)
+  await mapLimit(ownerIds, 3, async (id) => {
+    const one = await invoke(['contact', '+get-user', '--as', 'user', '--user-id', id], 5000)
+    if (!one) return
+    if (one.ok) {
+      const name = nameOf(one.data && one.data.user)
+      if (name && name !== id) names.set(id, name)
+    } else if (!error) {
+      error = why(one)
+    }
+  })
+  return { names, error: names.size ? '' : error }
+}
+
+/**
+ * Why creator names may be missing, for `doctor.json`: '' when they resolve.
+ *
+ * @returns `{ names }` — the last failure that kept an owner id on screen.
+ */
+export async function creatorStatus() {
+  const cache = await loadCache()
+  return { names: (cache.failures && cache.failures.names) || '' }
 }
 
 /**
@@ -197,12 +252,18 @@ export async function enrichCreators(docs) {
   })
 
   if (ask.length) {
-    const { owners, known } = await scan(ask)
+    const { owners, titles, known } = await scan(ask)
     for (const [token, owner] of owners) {
       const row = (cache.tokens[token] = cache.tokens[token] || {})
       row.owner = owner
       row.checkedAt = Date.now()
       delete row.deleted
+    }
+    for (const [token, title] of titles) {
+      const doc = docs.find((entry) => tokenOf(entry) === token)
+      // Only replace a missing title or the token fallback: a label the message
+      // itself gave stays, unless it is the token Feishu already names.
+      if (doc && (!doc.t || doc.t === token)) doc.t = title
     }
     for (const token of known) {
       const row = (cache.tokens[token] = cache.tokens[token] || {})
@@ -223,10 +284,15 @@ export async function enrichCreators(docs) {
   }
 
   const owners = [...new Set(Object.values(cache.tokens).map((row) => row && row.owner).filter(Boolean))]
-  await mapLimit(owners.filter((owner) => !cache.names[owner]), 3, async (owner) => {
-    const name = await findName(owner)
-    if (name) cache.names[owner] = name
-  })
+  const unnamed = owners.filter((owner) => !cache.names[owner])
+  if (unnamed.length) {
+    const { names, error } = await findNames(unnamed)
+    for (const [id, name] of names) cache.names[id] = name
+    // Keep the reason: an owner id shown as-is should be explainable.
+    cache.failures = cache.failures || {}
+    if (error && !names.size) cache.failures.names = error
+    else delete cache.failures.names
+  }
 
   for (const doc of docs) {
     const row = cache.tokens[tokenOf(doc)]

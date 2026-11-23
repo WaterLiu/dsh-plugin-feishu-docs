@@ -30,6 +30,12 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 清单本身在本机完成，除了解压日志不做任何网络请求。**创建者**是唯一的例外：日志里没有这个信息，插件通过本机的 `lark-cli`（用你已登录的飞书身份）查一次，结果缓存到 `~/.dsh/feishu-docs-owners.json`。没装 `lark-cli` 或没登录时，该列留空，不会编造。
 
+**创建者名字**还需要通讯录权限：owner id 一定能拿到，但要显示成人名需要 `contact:user:search`（或 `contact:user.basic_profile:readonly`）。没授权时显示缩写的 owner id（如 `ou_cfa0a78…9e11`），原因写在 `curl …/doctor.json` 的 `creatorNames` 字段里。授权一次即可：
+
+```bash
+lark-cli auth login --scope "contact:user:search"
+```
+
 **已删除**同理：先用一次批量元数据查询，飞书没返回的文档再逐个用 `drive +inspect` 确认，只有明确回答 `not exist` 才标记「已删除」（标题划掉，但仍留在列表里）。`permission denied` 不算删除，不会打标记。
 
 ## 验证
@@ -37,7 +43,7 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.0.3
+[feishu-docs] client apply, version 2.0.4
 [feishu-docs] header chip registered
 ```
 

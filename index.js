@@ -12,7 +12,7 @@
 import { execFile } from 'node:child_process'
 import zlib from 'node:zlib'
 import { readSession } from './scan.js'
-import { enrichCreators, larkCli } from './owners.js'
+import { creatorStatus, enrichCreators, larkCli } from './owners.js'
 
 /** The web server owns the route table. */
 export const inject = ['webServer']
@@ -42,13 +42,15 @@ export function apply(ctx) {
           })
 
         if (url.pathname.endsWith('/doctor.json')) {
-          const [fallbackCli, lark] = await Promise.all([which('zstd'), larkCli()])
+          const [fallbackCli, lark, creators] = await Promise.all([which('zstd'), larkCli(), creatorStatus()])
           return json({
             checkedAt: new Date().toISOString(),
             zstd: typeof zlib.zstdDecompressSync === 'function' ? 'core' : fallbackCli ? 'cli' : null,
             zstdPath: fallbackCli,
             // Creators can only be filled in when this is not null.
             larkCli: lark || null,
+            // Why an owner id is shown instead of a name, e.g. a missing scope.
+            creatorNames: creators.names || 'ok',
             node: process.version,
           })
         }
