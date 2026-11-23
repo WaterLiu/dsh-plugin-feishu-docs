@@ -11,11 +11,16 @@
  *                                             the documents of one Session, or
  *                                             `{ unchanged }` when nothing changed;
  *   GET  /x-feishu-docs/doctor.json           what this machine still needs;
- *   GET  /x-feishu-docs/avatar?u=<url>        the signed-in user's avatar, proxied;
+ *   GET  /x-feishu-docs/avatar                the signed-in user's avatar, cached;
+ *   GET  /x-feishu-docs/log?d=<json>           one client trace line, for support;
  *   GET  /x-feishu-docs/auth/start?scopes=<csv>   begin a device-code login;
  *   GET  /x-feishu-docs/auth/finish?device=<code> complete it;
  *   GET  /x-feishu-docs/auth/logout               sign out.
  */
+import { appendFile, rename, stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
 import { locate, readSession } from './scan.js'
 import { creatorStatus, enrichCreators } from './owners.js'
 import { cachedAvatar } from './avatar.js'
@@ -25,6 +30,9 @@ import { diagnose, finishLogin, logout, startLogin } from './setup.js'
 export const inject = ['webServer']
 
 const ROUTE = '/x-feishu-docs'
+/** Where the popover's traces land, next to the plugin's other files. */
+const STATE = process.env.FEISHU_DOCS_STATE_DIR || join(homedir(), '.dsh')
+const LOG_PATH = join(STATE, 'feishu-docs-log.ndjson')
 
 export function apply(ctx) {
   ctx.effect(() =>
@@ -43,6 +51,24 @@ export function apply(ctx) {
           const [report, creators] = await Promise.all([diagnose(), creatorStatus()])
           // Why an owner id is shown instead of a name, e.g. a missing scope.
           return json({ ...report, creatorNames: creators.names || 'ok' })
+        }
+
+        // The popover reports what a jump did, so a "nothing happened" can be read
+        // instead of guessed at. Bounded and local: the file rotates past 512 KiB.
+        if (url.pathname.endsWith('/log')) {
+          if (request.headers.get('x-feishu-docs') !== 'popover') return json({ error: 'bad request' }, 400)
+          const raw = url.searchParams.get('d') || ''
+          if (raw) {
+            try {
+              const line = `${JSON.stringify({ at: new Date().toISOString(), ...JSON.parse(raw) })}\n`
+              const size = await stat(LOG_PATH).then((info) => info.size).catch(() => 0)
+              if (size > 512 * 1024) await rename(LOG_PATH, `${LOG_PATH}.1`).catch(() => {})
+              await appendFile(LOG_PATH, line)
+            } catch (error) {
+              /* a trace that cannot be written must not break the popover */
+            }
+          }
+          return json({ ok: true })
         }
 
         // The avatar comes from the local cache, same-origin, so the page policy

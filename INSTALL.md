@@ -38,6 +38,18 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 退出只清除本机的飞书登录态，不动你的文档。退出后浮层会立刻变成「未登录飞书」，并出现「去授权」，重新授权一次即可恢复创建者、真实标题和删除标记。
 
+## 跳转没反应时怎么查
+
+跳转的每一步都会写一行追踪日志到 `~/.dsh/feishu-docs-log.ndjson`（超过 512 KiB 自动轮转成 `.1`）。真正排障时先看它：
+
+```bash
+tail -5 ~/.dsh/feishu-docs-log.ndjson
+```
+
+- 只有 `jump-start`、没有后续 → 前端在定位阶段就抛了异常（同时浮层会重新弹出并提示「跳转失败：…」）
+- 有 `jump-start` + `reveal` 且 `moved: false` → 目标就在视野里、滚动没有发生（这不算失败，高亮仍会打上）
+- 一行都没有 → 点击事件没到插件，检查胶囊是否还在页面上
+
 ## 跳转高亮
 
 点某行的 ⊙，会**直接滚到这份文档所在的那条消息**，并把消息里的**文档链接本身**高亮（琥珀色底 + 一圈描边，出现时脉冲两下）。
@@ -85,7 +97,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.5.0
+[feishu-docs] client apply, version 2.5.1
 [feishu-docs] header chip registered
 ```
 

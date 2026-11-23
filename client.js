@@ -25,11 +25,8 @@ function beacon(phase, extra) {
     return
   }
   try {
-    fetch('/x-feishu-docs/log', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.5.0', ...(extra || {}) }),
-    }).catch(() => {})
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.1', ...(extra || {}) }))
+    fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
   }
@@ -37,11 +34,8 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    fetch('/x-feishu-docs/log', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.5.0', ...(extra || {}) }),
-    }).catch(() => {})
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.5.1', ...(extra || {}) }))
+    fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
   }
@@ -452,7 +446,10 @@ window.__ModuleLoader__.load({
      * @returns whether the container ended up moving.
      */
     async function revealRow(row, doc) {
-      const scroller = scrollerFor(row)
+      // Always scroll the transcript itself. `scrollerFor` walks up to the nearest
+      // scrollable ancestor, which inside a code block is the block — a jump then
+      // nudges that instead of the conversation and appears to do nothing.
+      const scroller = transcript() || scrollerFor(row)
       if (!scroller) return false
 
       const before = scroller.scrollTop
@@ -997,8 +994,19 @@ window.__ModuleLoader__.load({
         window.setTimeout(() => setNote(''), ms)
       }
 
+      /** Run one jump, and never fail silently: an exception becomes a visible note. */
       const go = async (doc) => {
         report('jump-start', { turn: doc.turn, mid: doc.mid || '', ...pageFacts() })
+        try {
+          await jumpTo(doc)
+        } catch (error) {
+          report('jump-exception', { message: String(error), turn: doc.turn })
+          setOpen(true)
+          flash(`跳转失败：${String(error && error.message || error)}`, 5000)
+        }
+      }
+
+      const jumpTo = async (doc) => {
         // The document's own node is the better scroll target: it lands on the
         // line the reader is looking for, not on the top of a long turn.
         const immediate = docNode(doc) || findTurnRow(doc.turn)
