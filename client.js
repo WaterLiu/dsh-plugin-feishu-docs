@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.3.0', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.3.1', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.3.0', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.3.1', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1237,17 +1237,12 @@ window.__ModuleLoader__.load({
                 )),
                   )
                 : null,
-              // With nothing to list the footer is advice about rows that are not
-              // there; only a transient note (a copied command) keeps it alive.
-              docs.length || note
+              // The footer exists only to show a transient result (a copied command,
+              // a finished authorization). Standing advice about how to click a row
+              // was noise: the rows say that themselves.
+              note
                 ? h('div', { className: 'fd-pop-foot' },
-                    h('span', { className: 'fd-pop-hint' },
-                      note || (setupItems.length
-                        ? `还差 ${setupItems.length} 项设置`
-                        : doctor && doctor.creatorNames && doctor.creatorNames !== 'ok'
-                          ? '创建者显示为 id：通讯录权限未授予'
-                          : '点标题打开飞书，点 ⊙ 定位到该轮'),
-                    ),
+                    h('span', { className: 'fd-pop-hint' }, note),
                   )
                 : null,
             )
@@ -1259,7 +1254,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.3.0')
+        console.info('[feishu-docs] client apply, version 2.3.1')
         beacon('apply')
 
         try {
