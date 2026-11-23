@@ -28,11 +28,11 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 | `lark-cli` | 「复制命令」→ `npm install -g @larksuite/cli` |
 | 飞书授权（未登录 / 权限不足） | 「去授权」→ 自动打开飞书授权页，并在面板里留一个「打开授权页面」链接；你在浏览器确认后点「我已授权」，浮层自动刷新 |
 
-授权只会申请这个插件真正读取的权限：`drive:drive.metadata:readonly`（标题、创建者、是否被删除）和 `contact:user:search`（把人名显示出来，可选）。**之后如果授权失效，再打开浮层会重新出现这一项，并给出新的授权链接**（设备码 10 分钟内有效，过期就再点一次「去授权」）。
+授权只会申请这个插件真正读取的权限：`drive:drive.metadata:readonly`（标题、创建者、是否被删除）、`contact:user:search`（显示人名）和 `contact:user.basic_profile:readonly`（显示头像）。后两项只影响观感，没有也能用。**之后如果授权失效，再打开浮层会重新出现这一项，并给出新的授权链接**（设备码 10 分钟内有效，过期就再点一次「去授权」）。
 
 ## 当前账号与退出
 
-浮层顶部是**当前飞书账号**：头像（拿不到头像时用名字首字的圆形占位）、名字、`飞书个人用户 / Lark 个人用户`。右侧红色「退出」是两步的：第一次点击变成「确认退出」，再点一次才真正执行 `lark-cli auth logout`（6 秒内不确认会自动复位；也可以点「取消」）。
+浮层顶部是**当前飞书账号**：头像（经插件自身的 `/x-feishu-docs/avatar` 同源代理加载，只允许飞书域名；拿不到时用名字首字的圆形占位）、名字、`飞书个人用户 / Lark 个人用户`。右侧红色「退出」是两步的：第一次点击变成「确认退出」，再点一次才真正执行 `lark-cli auth logout`（6 秒内不确认会自动复位；也可以点「取消」）。
 
 还没登录时，头像位置就是一个「登录」按钮：点它直接发起授权，授权链接和「我已授权」出现在账号卡片正下方（和设置面板里的入口是同一套流程）。
 
@@ -53,8 +53,10 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 **创建者名字**还需要通讯录权限：owner id 一定能拿到，但要显示成人名需要 `contact:user:search`（或 `contact:user.basic_profile:readonly`）。没授权时显示缩写的 owner id（如 `ou_cfa0a78…9e11`），原因写在 `curl …/doctor.json` 的 `creatorNames` 字段里。授权一次即可：
 
 ```bash
-lark-cli auth login --scope "contact:user:search"
+lark-cli auth login --scope "contact:user:search contact:user.basic_profile:readonly"
 ```
+
+（`basic_profile` 那一项是给**头像**用的；只要人名可以只授 `contact:user:search`。）
 
 **已删除**同理：先用一次批量元数据查询，飞书没返回的文档再逐个用 `drive +inspect` 确认，只有明确回答 `not exist` 才标记「已删除」（标题划掉，但仍留在列表里）。`permission denied` 不算删除，不会打标记。
 
