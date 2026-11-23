@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.6', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.5.0', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.6', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.5.0', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -337,29 +337,23 @@ window.__ModuleLoader__.load({
      * @param row - the element to centre.
      * @returns whether the viewport actually moved.
      */
-    /** One injected stylesheet for the landing highlight. */
-    let landingStyles = false
-    function ensureLandingStyles() {
-      if (landingStyles) return
-      landingStyles = true
+    /** One injected stylesheet for the document mark. */
+    let markStyles = false
+    function ensureMarkStyles() {
+      if (markStyles) return
+      markStyles = true
       try {
         const style = document.createElement('style')
         style.textContent = `
-          @keyframes fd-land-in { from { opacity: 0 } to { opacity: 1 } }
-          .fd-landing-row { position: fixed; z-index: 65; pointer-events: none;
-                            border-radius: 12px; opacity: 1; box-sizing: border-box;
-                            background: color-mix(in srgb, #3370ff 5%, transparent);
-                            border: 2px solid color-mix(in srgb, #3370ff 55%, transparent);
-                            box-shadow: inset 3px 0 0 #3370ff,
-                                        0 0 0 3px color-mix(in srgb, #3370ff 10%, transparent);
-                            animation: fd-land-in .18s ease-out; }
-          .fd-landing-row[data-leaving] { opacity: 0; transition: opacity .2s ease-in; }
-          .fd-landing-tag { position: absolute; top: 6px; right: 10px; display: inline-flex; align-items: center;
-                            gap: 4px; max-width: calc(100% - 20px); padding: 1px 8px 1px 6px;
-                            border-radius: 9px; font-size: 10.5px; line-height: 16px; color: #fff;
-                            background: #3370ff; white-space: nowrap; overflow: hidden;
-                            text-overflow: ellipsis;
-                            box-shadow: 0 2px 6px color-mix(in srgb, #3370ff 40%, transparent); }
+          .fd-doc-hit { background: color-mix(in srgb, #FFB020 34%, transparent) !important;
+                        border-radius: 4px;
+                        box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 45%, transparent);
+                        transition: background .18s ease, box-shadow .18s ease; }
+          @keyframes fd-doc-hit-pulse {
+            from { box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 55%, transparent); }
+            to { box-shadow: 0 0 0 7px transparent; }
+          }
+          .fd-doc-hit[data-fresh] { animation: fd-doc-hit-pulse .85s ease-out 2; }
         `
         document.head.appendChild(style)
       } catch (error) {
@@ -367,164 +361,84 @@ window.__ModuleLoader__.load({
       }
     }
 
-
-    /**
-     * Where a highlight may be drawn: the transcript, minus the floating composer.
-     *
-     * The scrollport runs to the bottom of the window and the composer floats on
-     * top of it, so clipping to the scrollport alone still draws the frame under
-     * the input box — which is what made a jump look like it had taken over the
-     * whole page.
-     */
-    function transcriptRect() {
-      const port = document.querySelector('[data-conversation-scroll]')
-      const box = port && port.getBoundingClientRect()
-      const base = box && box.height > 0
-        ? { top: box.top, bottom: box.bottom, left: box.left, right: box.right }
-        : { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth }
-      const composer = document.querySelector('[data-composer]')
-      const cbox = composer && composer.getBoundingClientRect()
-      const ceiling = cbox && cbox.height > 0 ? cbox.top : Infinity
-      return {
-        top: Math.max(base.top, 0),
-        bottom: Math.min(base.bottom, window.innerHeight, ceiling),
-        left: Math.max(base.left, 0),
-        right: Math.min(base.right, window.innerWidth),
-      }
-    }
-
-    /** Area of an element, for picking the message rather than a wrapper around it. */
-    function areaOf(el) {
-      const box = el.getBoundingClientRect()
-      return box.width * box.height
-    }
-
-    /**
-     * The element that actually shows a document.
-     *
-     * A turn can hold dozens of messages, and framing the whole turn produced a box
-     * the size of the transcript. The row mentioning the document's title or token
-     * is the one worth marking; the smallest such row wins, because every ancestor
-     * of it contains the same text.
-     *
-     * @param turn - turn number, when known.
-     * @param fallback - the row the jump centred.
-     * @param doc - the document being jumped to.
-     * @returns an element, or null.
-     */
-    function landingTarget(turn, fallback, doc) {
-      const needle = normalize(doc && doc.t).slice(0, 20)
+    /** The element inside the transcript that shows a document, or null. */
+    function docNode(doc) {
       const token = String((doc && doc.u) || '').split('/').pop()
-      if (!turn || (!needle && !token)) return fallback
-      const hits = [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)]
-        .filter((el) => {
-          const text = normalize(el.textContent)
-          return (needle && text.includes(needle)) || (token && text.includes(token))
-        })
-        .sort((a, b) => areaOf(a) - areaOf(b))
-      return hits[0] || fallback
+      if (!token) return null
+      const turn = Number(doc && doc.turn)
+      const rows = turn ? [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)] : []
+      const scope = rows.length ? rows : [...document.querySelectorAll('[data-chat-turn]')]
+
+      // The link the message actually rendered is the best target: highlighting it
+      // marks the document itself, and it scrolls with the message.
+      for (const root of scope) {
+        for (const anchor of root.querySelectorAll('a[href]')) {
+          const href = anchor.getAttribute('href') || ''
+          if (href.includes(token) || (anchor.textContent || '').includes(token)) return anchor
+        }
+      }
+      // No anchor (a plain-text mention): mark the smallest row that shows it.
+      const mentions = scope.filter((root) => (root.textContent || '').includes(token))
+      mentions.sort((a, b) => {
+        const x = a.getBoundingClientRect()
+        const y = b.getBoundingClientRect()
+        return x.width * x.height - y.width * y.height
+      })
+      return mentions[0] || null
     }
 
-    /** The active highlight, so a new jump or any interaction can retire it. */
-    let landing = null
+    /** The mark currently on screen, and the timer that keeps it there. */
+    let marked = null
+    let markTimer = null
 
-    /** Retire the highlight and every listener it installed. */
-    function clearLanding() {
-      if (!landing) return
-      const { node, interval, listeners, dispose } = landing
-      landing = null
-      dispose?.()
-      window.clearInterval(interval)
-      for (const [event, handler, options] of listeners) {
-        window.removeEventListener(event, handler, options)
+    /** Remove the mark; safe to call when there is none. */
+    function clearDocMark() {
+      if (markTimer) {
+        window.clearInterval(markTimer)
+        markTimer = null
       }
-      node.dataset.leaving = ''
-      window.setTimeout(() => node.remove(), 220)
+      for (const el of document.querySelectorAll('.fd-doc-hit')) {
+        el.classList.remove('fd-doc-hit')
+        delete el.dataset.fresh
+      }
+      marked = null
     }
 
     /**
-     * Mark the whole message a jump landed on.
+     * Highlight the document inside the message it appears in.
      *
-     * The message can be taller than the viewport, so the tint covers the
-     * intersection of its rectangle with the viewport and follows the row as it
-     * scrolls. It stays put: reading means scrolling, and a frame that vanished on
-     * the first scroll hid the very thing it was pointing at. It is retired by the
-     * next jump, or by Escape.
+     * The message list re-renders as the Session grows, which replaces nodes, so
+     * the mark is re-applied on a timer instead of being set once.
      *
-     * @param row - the element the jump centred.
-     * @param label - the document title, when the caller has one.
+     * @param doc - the document the jump targeted.
      */
-    function showLandingCard(row, label, turn, doc) {
-      if (!row && !turn) return
-      clearLanding()
-      ensureLandingStyles()
+    function markDocument(doc) {
+      clearDocMark()
+      ensureMarkStyles()
 
-      const node = document.createElement('div')
-      node.className = 'fd-landing-row'
-
-      if (label) {
-        const tag = document.createElement('span')
-        tag.className = 'fd-landing-tag'
-        tag.textContent = label
-        node.appendChild(tag)
+      const paint = () => {
+        const node = docNode(doc)
+        if (!node) return
+        if (node !== marked) {
+          for (const el of document.querySelectorAll('.fd-doc-hit')) el.classList.remove('fd-doc-hit')
+          marked = node
+          node.dataset.fresh = ''
+        }
+        node.classList.add('fd-doc-hit')
       }
 
-      const tag = node.firstElementChild
+      paint()
+      markTimer = window.setInterval(paint, 400)
 
-      const place = () => {
-        const target = landingTarget(turn, row, doc)
-        const box = (target && target.getBoundingClientRect()) || null
-        if (!box || box.height < 2) {
-          node.style.display = 'none'
-          return
-        }
-        const port = transcriptRect()
-        const top = Math.max(box.top, port.top)
-        const bottom = Math.min(box.bottom, port.bottom)
-        const left = Math.max(box.left, port.left)
-        const right = Math.min(box.right, port.right)
-        // Off-screen, or squeezed to nothing by the viewport: nothing to outline.
-        if (bottom - top < 8 || right - left < 8) {
-          node.style.display = 'none'
-          return
-        }
-        node.style.display = ''
-        node.style.top = `${Math.round(top)}px`
-        node.style.left = `${Math.round(left)}px`
-        node.style.width = `${Math.round(right - left)}px`
-        node.style.height = `${Math.round(bottom - top)}px`
-
-        if (tag) {
-          // Keep the label inside the frame even when the message is scrolled.
-          tag.style.top = `${Math.round(Math.min(Math.max(0, box.top - top), bottom - top - 26) + 8)}px`
-        }
-      }
-
-      document.body.appendChild(node)
-      place()
-
-      const interval = window.setInterval(place, 150)
-
-      // Only a deliberate dismissal retires it: Escape. Scrolling, wheel, touch and
-      // clicks all happen while reading, so none of them may remove it.
       const onKey = (event) => {
-        if (event.key === 'Escape') clearLanding()
+        if (event.key === 'Escape') {
+          window.removeEventListener('keydown', onKey, true)
+          clearDocMark()
+        }
       }
       window.addEventListener('keydown', onKey, true)
-      const listeners = [['keydown', onKey, true]]
-
-      landing = { node, interval, listeners }
     }
 
-    /** The scroll container that actually scrolls this row. */
-    function scrollerFor(row) {
-      let parent = row && row.parentElement
-      for (let depth = 0; parent && depth < 12; depth += 1) {
-        if (parent.scrollHeight > parent.clientHeight + 4) return parent
-        parent = parent.parentElement
-      }
-      return transcript()
-    }
 
     /**
      * Centre one visible row.
@@ -537,7 +451,7 @@ window.__ModuleLoader__.load({
      * @param row - the visible element to centre.
      * @returns whether the container ended up moving.
      */
-    async function revealRow(row, label, turn, doc) {
+    async function revealRow(row, doc) {
       const scroller = scrollerFor(row)
       if (!scroller) return false
 
@@ -578,7 +492,7 @@ window.__ModuleLoader__.load({
         isScroller: scroller === transcript(),
       })
 
-      showLandingCard(row, label, turn, doc)
+      if (doc) markDocument(doc)
       return moved
     }
 
@@ -840,8 +754,8 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         setQuery('')
         setCreator('')
-        // A highlight belongs to the Session it was drawn in.
-        clearLanding()
+        // A mark belongs to the Session it was drawn in.
+        clearDocMark()
       }, [fullId])
 
       /**
@@ -1085,10 +999,12 @@ window.__ModuleLoader__.load({
 
       const go = async (doc) => {
         report('jump-start', { turn: doc.turn, mid: doc.mid || '', ...pageFacts() })
-        const immediate = findTurnRow(doc.turn)
+        // The document's own node is the better scroll target: it lands on the
+        // line the reader is looking for, not on the top of a long turn.
+        const immediate = docNode(doc) || findTurnRow(doc.turn)
         if (immediate) {
           setOpen(false)
-          const moved = await revealRow(immediate, doc.t, doc.turn, doc)
+          const moved = await revealRow(immediate, doc)
           flash(moved ? `已定位到第 ${doc.turn} 轮` : `第 ${doc.turn} 轮已就位，但页面没能滚动`, 2600)
           return
         }
@@ -1103,7 +1019,7 @@ window.__ModuleLoader__.load({
         }
         if (row) {
           setOpen(false)
-          const moved = await revealRow(row, doc.t, doc.turn, doc)
+          const moved = await revealRow(docNode(doc) || row, doc)
           flash(moved ? `已定位到第 ${doc.turn} 轮` : `第 ${doc.turn} 轮已就位，但页面没能滚动`, 2600)
           return
         }
@@ -1435,7 +1351,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.4.6')
+        console.info('[feishu-docs] client apply, version 2.5.0')
         beacon('apply')
 
         try {

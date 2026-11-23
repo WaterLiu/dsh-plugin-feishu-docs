@@ -40,7 +40,9 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 ## 跳转高亮
 
-点某行的 ⊙ 会跳到该文档出现的那一轮，并**框住真正显示这份文档的那条消息**（不是整轮——一轮可能有几十条消息）。高亮框被裁剪在聊天区可见范围内——**下沿让开浮动的输入框**，所以不会盖到输入框或标题栏；文档名标签贴在框的右上角。这个框**不会因为你滚动、滚轮、点击或打字而消失**（阅读就是要滚动），只有三种情况会收掉：按 **Esc**、跳转到另一轮、或切换到别的会话。
+点某行的 ⊙，会**直接滚到这份文档所在的那条消息**，并把消息里的**文档链接本身**高亮（琥珀色底 + 一圈描边，出现时脉冲两下）。
+
+不再画覆盖层，所以没有"框太大""盖住输入框"这类问题：高亮就是消息里的那个链接，跟着内容一起滚动。高亮**不会因为你滚动、点击或打字而消失**，只有三种情况会收掉：按 **Esc**、跳转到另一份文档、或切换到别的会话。
 
 ## 自动刷新
 
@@ -83,7 +85,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.4.6
+[feishu-docs] client apply, version 2.5.0
 [feishu-docs] header chip registered
 ```
 
