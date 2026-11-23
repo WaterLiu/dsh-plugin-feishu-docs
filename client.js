@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.0.2', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.0.3', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.0.2', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.0.3', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -801,6 +801,9 @@ window.__ModuleLoader__.load({
                    opacity:.6; background:color-mix(in srgb, currentColor 8%, transparent); }
           .fd-pop-new { flex:none; font-size:10px; padding:0 4px; border-radius:4px;
                         color:#0B7A3B; background:color-mix(in srgb, #34C724 22%, transparent); }
+          .fd-pop-gone a { opacity:.5; text-decoration:line-through; }
+          .fd-pop-del { flex:none; font-size:10px; padding:0 4px; border-radius:4px;
+                        color:#B42318; background:color-mix(in srgb, #F04438 16%, transparent); }
           .fd-jump { display:inline-flex; align-items:center; justify-content:center; flex:none;
                      width:22px; height:22px; padding:0; border-radius:50%; cursor:pointer;
                      color:inherit; opacity:.72;
@@ -852,9 +855,10 @@ window.__ModuleLoader__.load({
                   (i === 0 || docs[i - 1].d !== d.d)
                     ? h('div', { className: 'fd-pop-day' }, dayLabel(d.d))
                     : null,
-                  h('div', { className: 'fd-pop-row' },
+                  h('div', { className: d.deleted ? 'fd-pop-row fd-pop-gone' : 'fd-pop-row' },
                     h(TypeIcon, { type: d.ty }),
-                    h('a', { href: d.u, target: '_blank', rel: 'noreferrer', title: d.t }, d.t),
+                    h('a', { href: d.u, target: '_blank', rel: 'noreferrer', title: d.deleted ? `${d.t}（已删除）` : d.t }, d.t),
+                    d.deleted ? h('span', { className: 'fd-pop-del' }, '已删除') : null,
                     d.by ? h('span', { className: 'fd-by' }, d.by) : null,
                     d.new ? h('span', { className: 'fd-pop-new' }, '新建') : null,
                     h(JumpButton, { doc: d, onTrigger: () => go(d) }),
@@ -888,7 +892,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.0.2')
+        console.info('[feishu-docs] client apply, version 2.0.3')
         beacon('apply')
 
         try {

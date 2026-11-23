@@ -35,7 +35,7 @@ Restart DSH. The chip appears in the header of every Session.
 
 ## How it works
 
-The chip's host half reads the Session's own log — `~/.dsh/sessions/<project>/session-<id>/session.v4.jsonl.zstd` — and extracts Feishu links from its **user and assistant messages**. Nothing is precomputed. The log scan stays local; only the creator column asks Feishu, through `lark-cli`, and only when it is installed.
+The chip's host half reads the Session's own log — `~/.dsh/sessions/<project>/session-<id>/session.v4.jsonl.zstd` — and extracts Feishu links from its **user and assistant messages**. Nothing is precomputed. The log scan stays local; only the creator and the deleted check ask Feishu, through `lark-cli`, and only when it is installed.
 
 - A log is a *concatenation* of zstd frames; core Node stops after the first, so each frame is decoded separately (`scan.js`).
 - Titles come from the message's own Markdown link labels, so no API call is needed.
@@ -55,7 +55,8 @@ Bare URLs without a Markdown label fall back to their document token as the titl
 ## Known limits
 
 - **No cross-session jump** — DSH exposes no public session-switching API, so a document from another Session copies a citation instead.
-- **Creator needs `lark-cli`** — the name comes from Feishu through the CLI, using the signed-in user's own credentials. Without the CLI, or without a login, the column stays empty rather than guessing.
+- **Creator and deletion state need `lark-cli`** — both come from Feishu through the CLI, using the signed-in user's own credentials. Without the CLI, or without a login, the creator stays empty and no document is marked deleted, rather than guessing.
+- **A deleted document stays listed** — the list is what the Session mentioned, not what Feishu still has. A document Feishu answers `not exist` for is kept, struck through and marked 已删除; `permission denied` is *not* deletion, so such a document stays unmarked.
 - **Only messages count, not tool output** — a link buried in a tool result is deliberately invisible here.
 - **Turn jump depends on loaded history** — it pages back before falling back to copying the location.
 

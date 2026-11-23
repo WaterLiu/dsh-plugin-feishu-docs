@@ -280,7 +280,8 @@ export async function readSession(sessionId) {
       ...doc,
       t: doc.t || token, // a doc the text never named shows its token, not an empty row
       new: created.has(token),
-      by: '', // creator needs a Feishu lookup; the plugin stays offline
+      by: '', // creator needs a Feishu lookup: see owners.js
+      deleted: false, // whether the document still exists: see owners.js
       mid: '',
       cid: '',
     }
