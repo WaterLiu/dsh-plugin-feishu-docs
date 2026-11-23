@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.4', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.5', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.4', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.8.5', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -702,9 +702,6 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** Sessions whose history has already been paged to the top. */
-    const pagedToTop = new Set()
-
     
     /**
      * Bring the first mention of a document into the DOM.
@@ -718,37 +715,53 @@ window.__ModuleLoader__.load({
      * @param onProgress - called with the attempt count while paging.
      * @returns the element to scroll to, or null when history runs out.
      */
-    async function ensureFirstMention(doc, onProgress, sessionId) {
-      // The earliest mention can only be known once nothing older remains: the
-      // transcript is windowed, so any link found before that is merely the
-      // earliest *loaded* copy. Paging to the top once per Session is what makes
-      // "第一个出现的位置" a fact rather than a guess.
-      if (sessionId && !pagedToTop.has(sessionId)) {
-        let reachedTop = false
-        for (let attempt = 0; attempt < 60; attempt += 1) {
-          // The recorded message id is proof enough: once that row exists, nothing
-          // older needs loading. Only a build whose row keys lack the id has to be
-          // paged all the way back.
-          if (attempt > 0 && rowByMessageId(doc.mid)) break
-          onProgress?.(attempt + 1)
-          const more = await loadOlderOnce()
-          await new Promise((resolve) => window.setTimeout(resolve, 180))
-          if (!more) {
-            reachedTop = true
-            break
-          }
+    /**
+     * The row (or link) that shows a document, loading history until it exists.
+     *
+     * `data-chat-node-key` is the router's own key — the message id and the event
+     * `seq` are in the view node but not in the DOM — so the reliable anchors are
+     * the turn number and the token text. The recorded turn is the first mention,
+     * which makes "earliest" exact rather than a search order.
+     *
+     * @param doc - the document, with `turn` recorded at its first mention.
+     * @param onProgress - called with the attempt count while paging history.
+     * @returns the element to scroll to, or null when it never loads.
+     */
+    async function ensureFirstMention(doc, onProgress) {
+      const token = String((doc && doc.u) || '').split('/').pop()
+      const anchorInTurn = () => {
+        const turn = Number(doc && doc.turn)
+        if (!turn) return null
+        for (const row of [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)]) {
+          const anchor = [...row.querySelectorAll('a[href]')].find((el) => {
+            const href = el.getAttribute('href') || ''
+            return href.includes(token) || (el.textContent || '').includes(token)
+          })
+          if (anchor) return anchor
         }
-        // Only a Session actually paged to the start may skip this next time.
-        if (reachedTop) pagedToTop.add(sessionId)
-        report('jump-paged', { sessionId, reachedTop, mid: Boolean(doc.mid), keys: keySample() })
+        return null
       }
 
-      // After paging to the start, "first in document order" is the first mention
-      // by definition — and `docElement` also handles a mention rendered as text.
-      const byId = rowByMessageId(doc.mid)
-      const byTurn = byId ? null : findTurnRow(doc.turn)
-      report('jump-target', { mid: Boolean(doc.mid), byId: Boolean(byId), byTurn: Boolean(byTurn), keys: keySample() })
-      return byId || byTurn || docElement(doc)
+      // Already loaded: the row key may name it, otherwise the turn does.
+      const ready = rowByMessageId(doc.mid) || findTurnRow(doc.turn)
+      if (ready) return anchorInTurn() || ready
+
+      // Page older history until the recorded turn is mounted.
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        onProgress?.(attempt + 1)
+        const more = await loadOlderOnce()
+        await new Promise((resolve) => window.setTimeout(resolve, 200))
+        const row = rowByMessageId(doc.mid) || findTurnRow(doc.turn)
+        if (row) {
+          report('jump-first-found', { attempt: attempt + 1, mid: Boolean(doc.mid), viaTurn: Boolean(findTurnRow(doc.turn)) })
+          return anchorInTurn() || row
+        }
+        if (!more) break
+      }
+
+      const fallback = findTurnRow(doc.turn) || docElement(doc)
+      report('jump-first-exhausted', { found: Boolean(fallback), mid: Boolean(doc && doc.mid), keys: keySample() })
+      return fallback
     }
 
     function copyText(text) {
@@ -1205,11 +1218,8 @@ window.__ModuleLoader__.load({
       }
 
       const jumpTo = async (doc) => {
-        // Page to the start of history first (once per Session), so the target we
-        // pick really is the first mention — never a later copy that happens to be
-        // the nearest one loaded.
         flash('正在定位到首次出现的位置…', 20000)
-        const target = await ensureFirstMention(doc, (n) => flash(`正在加载更早的消息…第 ${n} 次`, 20000), fullId)
+        const target = await ensureFirstMention(doc, (n) => flash(`正在加载更早的消息…第 ${n} 次`, 20000))
         if (!target) {
           copyText(`${doc.t || ''} · 第 ${doc.turn || '?'} 轮 · ${doc.hm || ''}`)
           flash(`第 ${doc.turn} 轮仍未加载 · 已复制位置`, 2600)
