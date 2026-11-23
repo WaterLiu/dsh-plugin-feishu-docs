@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.0', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.1', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.0', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.1', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -802,6 +802,11 @@ window.__ModuleLoader__.load({
 
       const docs = useMemo(() => (data && data.docs) || [], [data])
       const user = (doctor && doctor.user) || {}
+      /** Scopes to request from the avatar's login button, honouring the diagnosis. */
+      const loginScopes = () => {
+        const authItem = doctor && Array.isArray(doctor.items) && doctor.items.find((item) => item.id === 'auth')
+        return (authItem && authItem.fix && authItem.fix.scopes) || ['drive:drive.metadata:readonly', 'contact:user:search']
+      }
 
       // Close on an outside press or Escape; both listeners live only while open.
       useEffect(() => {
@@ -915,6 +920,8 @@ window.__ModuleLoader__.load({
                          border:1px solid color-mix(in srgb, currentColor 18%, transparent); }
           .fd-setup-go:hover { background:color-mix(in srgb, currentColor 16%, transparent); }
           .fd-setup-link { display:flex; align-items:center; gap:6px; font-size:11px; flex-wrap:wrap; }
+          .fd-user-auth { padding:7px 10px; background:color-mix(in srgb, #3370FF 7%, transparent);
+                          border-bottom:1px solid color-mix(in srgb, currentColor 10%, transparent); }
           .fd-setup-link a { color:#3370FF; text-decoration:underline; word-break:break-all; }
           .fd-setup-err { font-size:11px; color:#B42318; }
           .fd-user { display:flex; align-items:center; gap:8px; padding:9px 10px;
@@ -923,6 +930,11 @@ window.__ModuleLoader__.load({
           .fd-user-initial { display:flex; align-items:center; justify-content:center;
                              font-size:12.5px; font-weight:600; color:#fff;
                              background:linear-gradient(135deg, #3370FF, #7C4DFF); }
+          .fd-user-login { display:flex; align-items:center; justify-content:center; cursor:pointer;
+                           font:inherit; font-size:10px; line-height:1; color:#3370FF;
+                           background:color-mix(in srgb, #3370FF 12%, transparent);
+                           border:1px solid color-mix(in srgb, #3370FF 45%, transparent); }
+          .fd-user-login:hover { background:color-mix(in srgb, #3370FF 22%, transparent); }
           .fd-user-text { flex:1 1 auto; min-width:0; }
           .fd-user-name { font-size:12.5px; font-weight:600; line-height:1.3;
                           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -973,15 +985,23 @@ window.__ModuleLoader__.load({
         open && rect
           ? h('div', { ref: popRef, className: 'fd-pop', style: { top: `${rect.top}px`, right: `${rect.right}px` } },
               h('div', { className: 'fd-user' },
-                user.avatar
-                  ? h('img', { className: 'fd-user-avatar', src: user.avatar, alt: '' })
-                  : h('div', { className: 'fd-user-avatar fd-user-initial' }, initialOf(user.name)),
+                user.available
+                  ? (user.avatar
+                      ? h('img', { className: 'fd-user-avatar', src: user.avatar, alt: '' })
+                      : h('div', { className: 'fd-user-avatar fd-user-initial' }, initialOf(user.name)))
+                  // The avatar slot is the login entry when nobody is signed in:
+                  // the one place a user looks for "who am I here".
+                  : h('button', {
+                      className: 'fd-user-avatar fd-user-login', type: 'button',
+                      title: '登录飞书账号',
+                      onClick: (e) => { e.preventDefault(); if (!authFlow.busy) startAuth(loginScopes()) },
+                    }, authFlow.busy ? '…' : '登录'),
                 h('div', { className: 'fd-user-text' },
                   h('div', { className: 'fd-user-name' }, user.name || '未登录飞书'),
                   h('div', { className: 'fd-user-sub' },
                     user.available
                       ? `${user.brand === 'lark' ? 'Lark' : '飞书'}个人用户`
-                      : '未授权，点下方「去授权」'),
+                      : '点左侧「登录」授权飞书'),
                 ),
                 user.available
                   ? h('button', {
@@ -998,6 +1018,22 @@ window.__ModuleLoader__.load({
                     }, '取消')
                   : null,
               ),
+              // The authorization link lives here, right under the account, so it
+              // shows whether it came from the avatar's 登录 or from the panel.
+              authFlow.url || authFlow.error
+                ? h('div', { className: 'fd-setup-link fd-user-auth' },
+                    authFlow.url
+                      ? h('a', { href: authFlow.url, target: '_blank', rel: 'noreferrer' }, '打开飞书授权页')
+                      : null,
+                    authFlow.url
+                      ? h('button', {
+                          className: 'fd-setup-go', type: 'button',
+                          onClick: (e) => { e.preventDefault(); if (!authFlow.busy) finishAuth() },
+                        }, authFlow.busy ? '确认中…' : '我已授权')
+                      : null,
+                    authFlow.error ? h('span', { className: 'fd-setup-err' }, authFlow.error) : null,
+                  )
+                : null,
               h('div', { className: 'fd-pop-head' },
                 h('span', null, '本会话云文档'),
                 h('span', { style: { marginLeft: 'auto' } }, `${docs.length} 篇`),
@@ -1019,16 +1055,6 @@ window.__ModuleLoader__.load({
                               onClick: (e) => { e.preventDefault(); if (!authFlow.busy) startAuth(item.fix.scopes) },
                             }, authFlow.busy ? '发起中…' : '去授权'),
                       )),
-                      authFlow.url
-                        ? h('div', { className: 'fd-setup-link' },
-                            h('a', { href: authFlow.url, target: '_blank', rel: 'noreferrer' }, '打开授权页面'),
-                            h('button', {
-                              className: 'fd-setup-go', type: 'button',
-                              onClick: (e) => { e.preventDefault(); if (!authFlow.busy) finishAuth() },
-                            }, authFlow.busy ? '确认中…' : '我已授权'),
-                          )
-                        : null,
-                      authFlow.error ? h('div', { className: 'fd-setup-err' }, authFlow.error) : null,
                     )
                   : null,
                 docs.length === 0
@@ -1071,7 +1097,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.2.0')
+        console.info('[feishu-docs] client apply, version 2.2.1')
         beacon('apply')
 
         try {
