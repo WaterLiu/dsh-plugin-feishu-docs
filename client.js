@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.2', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.3', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.4.2', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.4.3', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1018,9 +1018,9 @@ window.__ModuleLoader__.load({
       const shown = useMemo(() => docs.filter((d) => {
         if (creator && d.by !== creator) return false
         if (!needle) return true
-        // Title, creator and the token itself: a search box that only matched the
-        // visible title would miss the rows still showing a token.
-        return [d.t, d.by, d.u].some((field) => String(field || '').toLowerCase().includes(needle))
+        // Title and the token in its URL: a row still showing a bare token is
+        // findable that way. The creator is not searched — 来自用户 filters by it.
+        return [d.t, d.u].some((field) => String(field || '').toLowerCase().includes(needle))
       }), [docs, creator, needle])
       // A new account means the previous failure no longer applies.
       useEffect(() => { setAvatarBroken(false) }, [user.avatarAt])
@@ -1329,7 +1329,7 @@ window.__ModuleLoader__.load({
                     h(SearchIcon, null),
                     h('input', {
                       className: 'fd-search-input', type: 'search', value: query,
-                      placeholder: '搜索文档或创建者', spellCheck: false,
+                      placeholder: '搜索文档名称', spellCheck: false,
                       'aria-label': '搜索本文档列表',
                       onChange: (e) => setQuery(e.target.value),
                       onKeyDown: (e) => {
@@ -1387,7 +1387,7 @@ window.__ModuleLoader__.load({
                     h('a', { href: d.u, target: '_blank', rel: 'noreferrer', title: d.deleted ? `${d.t}（已删除）` : d.t },
                       highlight(d.t, needle)),
                     d.deleted ? h('span', { className: 'fd-pop-del' }, '已删除') : null,
-                    d.by ? h('span', { className: 'fd-by', title: d.by }, highlight(shortBy(d.by), needle)) : null,
+                    d.by ? h('span', { className: 'fd-by', title: d.by }, shortBy(d.by)) : null,
                     d.new ? h('span', { className: 'fd-pop-new' }, '新建') : null,
                     h(JumpButton, { doc: d, onTrigger: () => go(d) }),
                   ),
@@ -1411,7 +1411,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.4.2')
+        console.info('[feishu-docs] client apply, version 2.4.3')
         beacon('apply')
 
         try {
