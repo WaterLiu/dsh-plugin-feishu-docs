@@ -1,0 +1,87 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Feishu documents",
+    "zh": "飞书云文档"
+  },
+  "description": {
+    "en": "Feishu cloud documents of each session, listed from its own log.",
+    "zh": "按会话列出其消息中出现过的飞书云文档。"
+  },
+  "metadata": {
+    "categories": {
+      "productivity": {
+        "title": {
+          "en": "Productivity",
+          "zh": "效率"
+        }
+      },
+      "documents": {
+        "title": {
+          "en": "Documents",
+          "zh": "文档"
+        }
+      }
+    },
+    "labels": {
+      "feishu": {
+        "title": {
+          "en": "Feishu",
+          "zh": "飞书"
+        }
+      },
+      "offline": {
+        "title": {
+          "en": "Works offline",
+          "zh": "离线可用"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-plugin-feishu-docs",
+      "title": {
+        "en": "Feishu documents",
+        "zh": "飞书云文档"
+      },
+      "description": {
+        "en": "A ☁ chip in the session header listing the Feishu documents its messages mention, with creator and a jump to the turn.",
+        "zh": "会话标题栏的 ☁ 胶囊，列出该会话消息中出现的飞书文档，含创建者并可跳转到对应轮次。"
+      },
+      "author": "your-name",
+      "homepage": "https://github.com/bytedance/dsh-plugin-feishu-docs",
+      "repository": {
+        "url": "https://github.com/bytedance/dsh-plugin-feishu-docs"
+      },
+      "metadata": {
+        "category": "documents",
+        "labels": [
+          "feishu",
+          "offline"
+        ],
+        "keywords": [
+          "feishu",
+          "lark",
+          "documents",
+          "session"
+        ]
+      },
+      "versions": [
+        {
+          "version": "2.0.0",
+          "publishTimestamp": 1795442521,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/bytedance/dsh-plugin-feishu-docs",
+            "commit": "03c75bdc90383fac3e7a5badd2b1f836cc89f945",
+            "path": "."
+          },
+          "engines": {
+            "dsh": ">=0.2.0"
+          }
+        }
+      ]
+    }
+  ]
+}
