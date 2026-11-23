@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.2', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.3', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.2.2', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.3', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -690,6 +690,17 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** The placeholder shown in the avatar slot while nobody is signed in. */
+    function UserGlyph(props) {
+      return h('svg', {
+        width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': true,
+        style: { display: 'block', opacity: props && props.dim ? 0.7 : 1 },
+      },
+        h('circle', { cx: 8, cy: 5.4, r: 2.7, fill: 'currentColor', opacity: 0.85 }),
+        h('path', { d: 'M2.6 14.2c0-2.6 2.4-4.3 5.4-4.3s5.4 1.7 5.4 4.3z', fill: 'currentColor', opacity: 0.85 }),
+      )
+    }
+
     /** One character for a user whose avatar Feishu would not hand over. */
     function initialOf(name) {
       const text = String(name || '').trim()
@@ -749,11 +760,69 @@ window.__ModuleLoader__.load({
             setAuthFlow({ busy: false, url: '', deviceCode: '', error: answer.error || '发起授权失败' })
             return
           }
-          setAuthFlow({ busy: false, url: answer.url, deviceCode: answer.deviceCode, error: '' })
+          setAuthFlow({ busy: true, url: answer.url, deviceCode: answer.deviceCode, error: '' })
           try { window.open(answer.url, '_blank', 'noreferrer') } catch (error) { /* the link is shown anyway */ }
+          pollAuth(answer.deviceCode)
         } catch (error) {
           setAuthFlow({ busy: false, url: '', deviceCode: '', error: String(error) })
         }
+      }
+
+      /** Stop the authorization poll (done, expired, or the chip unmounted). */
+      const pollRef = React.useRef(null)
+      const stopPolling = () => {
+        if (pollRef.current) {
+          window.clearTimeout(pollRef.current)
+          pollRef.current = null
+        }
+      }
+      useEffect(() => stopPolling, [])
+
+      /** Everything the popover must re-read once the token exists. */
+      const afterAuth = () => {
+        flash('飞书授权完成', 2600)
+        refreshDoctor()
+        loadSession(fullId, true).then((d) => setData(d)).catch(() => {})
+      }
+
+      /**
+       * Keep asking the host whether the device flow finished.
+       *
+       * The user is in a browser tab; nothing here is a click away, so the popover
+       * polls instead of asking them to come back and press a button.
+       */
+      const pollAuth = (deviceCode) => {
+        stopPolling()
+        if (!deviceCode) return
+        const deadline = Date.now() + 5 * 60 * 1000
+        const tick = async () => {
+          pollRef.current = null
+          if (Date.now() > deadline) {
+            setAuthFlow({ busy: false, url: '', deviceCode: '', error: '授权超时，请重新点「登录」' })
+            return
+          }
+          try {
+            const answer = await readJson(await fetch(`/x-feishu-docs/auth/finish?device=${encodeURIComponent(deviceCode)}`, {
+              headers: { 'x-feishu-docs': 'popover' },
+              cache: 'no-store',
+            }))
+            if (answer.ok) {
+              setAuthFlow({ busy: false, url: '', deviceCode: '', error: '' })
+              afterAuth()
+              return
+            }
+            // A device code that cannot work any more is fatal; anything else is
+            // "keep waiting", which is the normal case until the user confirms.
+            if (/invalid|expired|not found/i.test(String(answer.error || ''))) {
+              setAuthFlow({ busy: false, url: '', deviceCode: '', error: String(answer.error) })
+              return
+            }
+          } catch (error) {
+            /* a transient failure is not a reason to stop waiting */
+          }
+          pollRef.current = window.setTimeout(tick, 2500)
+        }
+        pollRef.current = window.setTimeout(tick, 1500)
       }
 
       /**
@@ -798,10 +867,9 @@ window.__ModuleLoader__.load({
             setAuthFlow((prev) => ({ ...prev, busy: false, error: answer.error || '授权未完成' }))
             return
           }
+          stopPolling()
           setAuthFlow({ busy: false, url: '', deviceCode: '', error: '' })
-          flash('授权完成，正在刷新…', 2600)
-          refreshDoctor()
-          loadSession(fullId, true).then((d) => setData(d)).catch(() => {})
+          afterAuth()
         } catch (error) {
           setAuthFlow((prev) => ({ ...prev, busy: false, error: String(error) }))
         }
@@ -947,11 +1015,11 @@ window.__ModuleLoader__.load({
           .fd-user-initial { display:flex; align-items:center; justify-content:center;
                              font-size:12.5px; font-weight:600; color:#fff;
                              background:linear-gradient(135deg, #3370FF, #7C4DFF); }
-          .fd-user-login { display:flex; align-items:center; justify-content:center; cursor:pointer;
-                           font:inherit; font-size:10px; line-height:1; color:#3370FF;
-                           background:color-mix(in srgb, #3370FF 12%, transparent);
-                           border:1px solid color-mix(in srgb, #3370FF 45%, transparent); }
-          .fd-user-login:hover { background:color-mix(in srgb, #3370FF 22%, transparent); }
+          .fd-user-dim { color:#fff; background:color-mix(in srgb, currentColor 12%, transparent); }
+          .fd-user-signin { flex:none; height:22px; padding:0 10px; border-radius:11px; cursor:pointer;
+                            font:inherit; font-size:11px; color:#fff; background:#3370FF;
+                            border:1px solid #3370FF; }
+          .fd-user-signin:hover { background:#245CE0; border-color:#245CE0; }
           .fd-user-text { flex:1 1 auto; min-width:0; }
           .fd-user-name { font-size:12.5px; font-weight:600; line-height:1.3;
                           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -1011,13 +1079,7 @@ window.__ModuleLoader__.load({
                           onError: () => setAvatarBroken(true),
                         })
                       : h('div', { className: 'fd-user-avatar fd-user-initial' }, initialOf(user.name)))
-                  // The avatar slot is the login entry when nobody is signed in:
-                  // the one place a user looks for "who am I here".
-                  : h('button', {
-                      className: 'fd-user-avatar fd-user-login', type: 'button',
-                      title: '登录飞书账号',
-                      onClick: (e) => { e.preventDefault(); if (!authFlow.busy) startAuth(loginScopes()) },
-                    }, authFlow.busy ? '…' : '登录'),
+                  : h('div', { className: 'fd-user-avatar fd-user-initial fd-user-dim' }, h(UserGlyph, null)),
                 h('div', { className: 'fd-user-text' },
                   h('div', { className: 'fd-user-name' }, user.name || '未登录飞书'),
                   h('div', { className: 'fd-user-sub' },
@@ -1039,6 +1101,13 @@ window.__ModuleLoader__.load({
                       onClick: (e) => { e.preventDefault(); setLogoutAsk(false) },
                     }, '取消')
                   : null,
+                user.available
+                  ? null
+                  : h('button', {
+                      className: 'fd-user-signin', type: 'button',
+                      title: '登录飞书账号',
+                      onClick: (e) => { e.preventDefault(); if (!authFlow.busy) startAuth(loginScopes()) },
+                    }, authFlow.busy ? '等待授权…' : '登录'),
               ),
               // The authorization link lives here, right under the account, so it
               // shows whether it came from the avatar's 登录 or from the panel.
@@ -1119,7 +1188,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.2.2')
+        console.info('[feishu-docs] client apply, version 2.2.3')
         beacon('apply')
 
         try {

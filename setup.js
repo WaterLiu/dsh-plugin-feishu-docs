@@ -200,7 +200,9 @@ export async function logout() {
  */
 export async function finishLogin(deviceCode) {
   if (!deviceCode) return { error: '缺少 device_code' }
-  const answer = await invoke(['auth', 'login', '--device-code', deviceCode, '--json'], 30000)
+  // Short timeout on purpose: the CLI may block until the user authorizes, and
+  // the popover polls this, so a killed attempt must cost seconds, not minutes.
+  const answer = await invoke(['auth', 'login', '--device-code', deviceCode, '--json'], 8000)
   if (!answer) return { error: 'lark-cli 没有返回结果' }
   if (answer.ok === false) return { error: (answer.error && answer.error.message) || '授权尚未完成，请在浏览器里确认后重试' }
   return { ok: true }

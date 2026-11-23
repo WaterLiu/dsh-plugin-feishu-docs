@@ -44,7 +44,7 @@ The chip's host half reads the Session's own log — `~/.dsh/sessions/<project>/
 
 Bare URLs without a Markdown label fall back to their document token as the title until Feishu supplies the real one.
 
-The popover opens with the signed-in Feishu account: avatar (or an initial), name, and `飞书个人用户`. The red 退出 button signs the CLI out — two presses, with a cancel between them, because losing the token costs the creator and title columns. When nobody is signed in, that avatar slot is a 登录 button that starts the same device-code login, with the link and 我已授权 right under the card. Signing out is only local; the documents are untouched, and the authorization item comes back so one press restores everything.
+The popover opens with the signed-in Feishu account: avatar (or an initial), name, and `飞书个人用户`. The red 退出 button signs the CLI out — two presses, with a cancel between them, because losing the token costs the creator and title columns. When nobody is signed in, the card shows a default avatar and a 登录 button; the authorization page opens, and the popover polls the device flow so the account appears by itself once you confirm in the browser. Signing out is only local; the documents are untouched, and the authorization item comes back so one press restores everything.
 
 ## First run
 
