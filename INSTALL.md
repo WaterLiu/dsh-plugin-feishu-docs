@@ -46,7 +46,9 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 ## 已知修复（上游遗留）
 
-`lark-cli` 之外，作者原版 `client.js` 里还有一个潜伏 bug：`loadOlderOnce()` 调用了 `nudgeTop()`，但**这个函数从未定义**——只有"需要翻更早历史"的路径才会踩到，平时感觉不到。本仓库已补上实现（把聊天区滚到顶部触发它自己的无限滚动），同时补回了被删掉的 `scrollerFor()`。
+`lark-cli` 之外，作者原版 `client.js` 里还有一个潜伏 bug：`loadOlderOnce()` 调用了 `nudgeTop()`，但**这个函数从未定义**——只有"需要翻更早历史"的路径才会踩到。
+
+本仓库补回了被删掉的 `scrollerFor()`，并**彻底去掉了 `nudgeTop()`**：它原本的做法是把聊天区滚到顶部，一旦历史翻不到目标就会看起来像"跳转没反应"。现在翻历史只用两条正式途径：DSH 自己的历史按钮，或 `conversation` / `uiConversation` 的 `loadOlder()`（运行时探测，不写成 `inject` 依赖，避免某个版本没有该服务时整个插件无法激活）。两者都不可用时，6 次尝试后如实提示「已定位到最近可加载的位置」，绝不动你的视图位置。
 
 ## 跳转没反应时怎么查
 
