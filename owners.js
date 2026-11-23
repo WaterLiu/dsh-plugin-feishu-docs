@@ -160,19 +160,22 @@ async function scan(docs) {
 }
 
 /**
- * Probe one document for existence.
+ * Probe one document for existence, and take its title while we are there.
  *
- * @returns `'exists'`, `'deleted'`, or `'unknown'` — permission, scope, network
- *   and credential failures are all "unknown", because none of them mean the
- *   document is gone.
+ * @returns `{ verdict, title }` — `verdict` is `'exists'`, `'deleted'` or
+ *   `'unknown'`; permission, scope, network and credential failures are all
+ *   `'unknown'`, because none of them mean the document is gone.
  */
 async function checkDocument(url) {
   const parsed = await invoke(['drive', '+inspect', '--as', 'user', '--url', url], 6000)
-  if (!parsed) return 'unknown'
-  if (parsed.ok) return 'exists'
+  if (!parsed) return { verdict: 'unknown', title: '' }
+  if (parsed.ok) {
+    const answer = parsed.data || {}
+    return { verdict: 'exists', title: String(answer.title || answer.name || '').trim() }
+  }
   const error = parsed.error || {}
   const said = `${error.subtype || ''} ${error.message || ''} ${error.code || ''}`
-  return GONE.test(said) ? 'deleted' : 'unknown'
+  return { verdict: GONE.test(said) ? 'deleted' : 'unknown', title: '' }
 }
 
 const nameOf = (user) => (user && (user.localized_name || user.name || user.en_name)) || ''
@@ -246,10 +249,8 @@ export async function enrichCreators(docs) {
 
   const cache = await loadCache()
   const stale = (row) => !row || !row.checkedAt || Date.now() - row.checkedAt > TTL
-  const ask = docs.filter((doc) => {
-    const row = cache.tokens[tokenOf(doc)]
-    return !(row && row.owner) && stale(row)
-  })
+  // A document is asked about when Feishu's answer about it is missing or old.
+  const ask = docs.filter((doc) => stale(cache.tokens[tokenOf(doc)]))
 
   if (ask.length) {
     const { owners, titles, known } = await scan(ask)
@@ -260,25 +261,28 @@ export async function enrichCreators(docs) {
       delete row.deleted
     }
     for (const [token, title] of titles) {
-      const doc = docs.find((entry) => tokenOf(entry) === token)
-      // Only replace a missing title or the token fallback: a label the message
-      // itself gave stays, unless it is the token Feishu already names.
-      if (doc && (!doc.t || doc.t === token)) doc.t = title
+      const row = (cache.tokens[token] = cache.tokens[token] || {})
+      row.title = title
+      row.checkedAt = Date.now()
+      delete row.deleted
     }
     for (const token of known) {
       const row = (cache.tokens[token] = cache.tokens[token] || {})
       row.checkedAt = Date.now()
       delete row.deleted
     }
-    // Feishu did not account for these: ask each one directly whether it is gone.
-    const missing = ask.filter((doc) => !known.has(tokenOf(doc)))
-    await mapLimit(missing, 3, async (doc) => {
-      const verdict = await checkDocument(doc.u)
+
+    // Whatever the metadata call did not answer — a gone document, or one it
+    // has no title for — is asked about directly.
+    const pending = ask.filter((doc) => !known.has(tokenOf(doc)) || !titles.has(tokenOf(doc)))
+    await mapLimit(pending, 3, async (doc) => {
+      const { verdict, title } = await checkDocument(doc.u)
       const row = (cache.tokens[tokenOf(doc)] = cache.tokens[tokenOf(doc)] || {})
       if (verdict === 'deleted') row.deleted = true
       else if (verdict === 'exists') delete row.deleted
-      // An unanswered probe (permission, network, credentials) keeps the previous
-      // verdict and waits out the TTL instead of being retried on every open.
+      if (title) row.title = title
+      // An unanswered probe keeps the previous verdict and waits out the TTL
+      // instead of being retried on every open.
       row.checkedAt = Date.now()
     })
   }
@@ -295,10 +299,14 @@ export async function enrichCreators(docs) {
   }
 
   for (const doc of docs) {
-    const row = cache.tokens[tokenOf(doc)]
+    const token = tokenOf(doc)
+    const row = cache.tokens[token]
     if (!row) continue
     doc.deleted = row.deleted === true
     if (row.owner) doc.by = cache.names[row.owner] || row.owner
+    // A label the message itself gave stays; a missing title or a bare token is
+    // replaced by the document's real name.
+    if ((!doc.t || doc.t === token) && row.title) doc.t = row.title
   }
 
   await saveCache(cache)
