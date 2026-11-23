@@ -61,6 +61,34 @@ export function envelope(text) {
 }
 
 /**
+ * Run one `lark-cli` call.
+ *
+ * @param args - subcommand and flags.
+ * @param timeout - milliseconds before the process is killed.
+ * @returns `{ code, envelope, text }` — `code` is the exit status, `envelope`
+ *   the JSON it printed on either stream, `text` whatever it printed.
+ */
+export async function run(args, timeout = 15000) {
+  const bin = await findCli()
+  if (!bin) return { code: -1, envelope: null, text: '' }
+  const [code, stdout, stderr] = await new Promise((done) => {
+    execFile(bin, args, {
+      timeout,
+      maxBuffer: 8 * 1024 * 1024,
+      env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' },
+    }, (error, out, err) => {
+      const status = error ? (typeof error.code === 'number' ? error.code : 1) : 0
+      done([status, String(out || ''), String(err || '')])
+    })
+  })
+  return {
+    code,
+    envelope: envelope(stdout) || envelope(stderr),
+    text: `${stdout}\n${stderr}`.trim(),
+  }
+}
+
+/**
  * Run one `lark-cli` call and return its envelope from either stream.
  *
  * @param args - subcommand and flags.
@@ -68,16 +96,8 @@ export function envelope(text) {
  * @returns the envelope, or null when the CLI printed none.
  */
 export async function invoke(args, timeout = 15000) {
-  const bin = await findCli()
-  if (!bin) return null
-  const [stdout, stderr] = await new Promise((done) => {
-    execFile(bin, args, {
-      timeout,
-      maxBuffer: 8 * 1024 * 1024,
-      env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' },
-    }, (error, out, err) => done([String(out || ''), String(err || '')]))
-  })
-  return envelope(stdout) || envelope(stderr)
+  const result = await run(args, timeout)
+  return result.envelope
 }
 
 /** The `data` of a successful call, else null. */

@@ -13,7 +13,7 @@
 import { execFile } from 'node:child_process'
 import zlib from 'node:zlib'
 
-import { invoke, larkCli } from './cli.js'
+import { invoke, larkCli, run } from './cli.js'
 
 /** Scopes this plugin cannot work without: document metadata, titles, owners. */
 const REQUIRED_SCOPES = ['drive:drive.metadata:readonly']
@@ -39,17 +39,40 @@ async function zstdState() {
 
 /** Who is signed in, till when, and which of our scopes the token carries. */
 async function authState() {
-  const state = { available: false, userName: '', expiresAt: '', missing: [], required: REQUIRED_SCOPES, nice: NICE_SCOPES }
+  const state = { available: false, userName: '', openId: '', brand: 'feishu', expiresAt: '', missing: [], required: REQUIRED_SCOPES, nice: NICE_SCOPES }
   const status = await invoke(['auth', 'status', '--json'])
+  if (status && status.brand) state.brand = status.brand
   const user = status && status.identities && status.identities.user
   if (!user) return state
   state.available = Boolean(user.available) && user.tokenStatus === 'valid'
   state.userName = user.userName || ''
+  state.openId = user.openId || ''
   state.expiresAt = user.expiresAt || ''
   if (!state.available) return state
   const checked = await invoke(['auth', 'check', '--scope', [...REQUIRED_SCOPES, ...NICE_SCOPES].join(' '), '--json'])
   if (checked) state.missing = Array.isArray(checked.missing) ? checked.missing : []
   return state
+}
+
+/**
+ * The signed-in user's avatar, or '' when Feishu will not give one.
+ *
+ * The contact shortcuts do not expose an avatar, so this asks the raw user
+ * endpoint, which needs a contact scope. A miss is cached for five minutes: the
+ * account card falls back to an initial, and a granted scope shows up soon.
+ */
+let avatarCache = { openId: '', url: '', at: 0 }
+async function findAvatar(openId) {
+  if (!openId) return ''
+  const fresh = avatarCache.openId === openId && Date.now() - avatarCache.at < 5 * 60 * 1000
+  if (fresh) return avatarCache.url
+  const answer = await invoke(['contact', '+get-user', '--as', 'user', '--user-id', openId], 5000)
+  const user = answer && answer.ok && answer.data && answer.data.user
+  const avatar = user && (typeof user.avatar === 'string'
+    ? user.avatar
+    : user.avatar && (user.avatar.avatar_240 || user.avatar.avatar_640 || user.avatar.avatar_72 || user.avatar.avatar_1920)) || ''
+  avatarCache = { openId, url: String(avatar || ''), at: Date.now() }
+  return avatarCache.url
 }
 
 /**
@@ -103,9 +126,18 @@ export async function diagnose() {
     })
   }
 
+  const user = {
+    available: auth.available,
+    name: auth.userName,
+    openId: auth.openId,
+    brand: auth.brand,
+    avatar: auth.available ? await findAvatar(auth.openId) : '',
+  }
+
   return {
     checkedAt: new Date().toISOString(),
     ok: items.every((item) => item.ok),
+    user,
     // What the popover should offer to fix: an item with a fix is actionable.
     pending: items.filter((item) => item.fix).map((item) => item.id),
     items,
@@ -131,6 +163,21 @@ export async function startLogin(scopes) {
   const url = answer.verification_url || answer.verification_uri
   if (!url) return { error: '没有拿到授权链接' }
   return { url, deviceCode: answer.device_code || '', expiresIn: answer.expires_in || 600 }
+}
+
+/**
+ * Sign out, which clears the token this plugin relies on.
+ *
+ * @returns `{ ok }` or `{ error }`.
+ */
+export async function logout() {
+  const result = await run(['auth', 'logout', '--json'], 20000)
+  if (result.code === 0) return { ok: true }
+  if (result.envelope && result.envelope.ok === false) {
+    const error = result.envelope.error || {}
+    return { error: error.message || '退出失败' }
+  }
+  return { error: result.text ? result.text.split('\n').filter(Boolean).slice(-1)[0] : '退出失败' }
 }
 
 /**

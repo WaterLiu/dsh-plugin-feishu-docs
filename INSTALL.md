@@ -30,6 +30,12 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 授权只会申请这个插件真正读取的权限：`drive:drive.metadata:readonly`（标题、创建者、是否被删除）和 `contact:user:search`（把人名显示出来，可选）。**之后如果授权失效，再打开浮层会重新出现这一项，并给出新的授权链接**（设备码 10 分钟内有效，过期就再点一次「去授权」）。
 
+## 当前账号与退出
+
+浮层顶部是**当前飞书账号**：头像（拿不到头像时用名字首字的圆形占位）、名字、`飞书个人用户 / Lark 个人用户`。右侧红色「退出」是两步的：第一次点击变成「确认退出」，再点一次才真正执行 `lark-cli auth logout`（6 秒内不确认会自动复位；也可以点「取消」）。
+
+退出只清除本机的飞书登录态，不动你的文档。退出后浮层会立刻变成「未登录飞书」，并出现「去授权」，重新授权一次即可恢复创建者、真实标题和删除标记。
+
 ## 数据从哪来
 
 不需要准备任何数据。插件在你在打开浮层时，直接读**当前会话自己的日志**：
@@ -55,7 +61,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.1.0
+[feishu-docs] client apply, version 2.2.0
 [feishu-docs] header chip registered
 ```
 

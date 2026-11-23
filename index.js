@@ -10,11 +10,12 @@
  *   GET  /x-feishu-docs/session.json?sid=<id>  the documents of one Session;
  *   GET  /x-feishu-docs/doctor.json           what this machine still needs;
  *   POST /x-feishu-docs/auth/start            begin a device-code login;
- *   POST /x-feishu-docs/auth/finish           complete it.
+ *   POST /x-feishu-docs/auth/finish           complete it;
+ *   POST /x-feishu-docs/auth/logout           sign out.
  */
 import { readSession } from './scan.js'
 import { creatorStatus, enrichCreators } from './owners.js'
-import { diagnose, finishLogin, startLogin } from './setup.js'
+import { diagnose, finishLogin, logout, startLogin } from './setup.js'
 
 /** The web server owns the route table. */
 export const inject = ['webServer']
@@ -43,7 +44,7 @@ export function apply(ctx) {
         // The authorization routes change state, so they only accept a POST that
         // the popover itself made: the custom header forces a preflight, which a
         // foreign page cannot satisfy.
-        if (url.pathname.endsWith('/auth/start') || url.pathname.endsWith('/auth/finish')) {
+        if (url.pathname.endsWith('/auth/start') || url.pathname.endsWith('/auth/finish') || url.pathname.endsWith('/auth/logout')) {
           if (request.method !== 'POST') return json({ error: 'POST only' }, 405)
           if (request.headers.get('x-feishu-docs') !== 'popover') return json({ error: 'bad request' }, 400)
           let body = {}
@@ -54,6 +55,7 @@ export function apply(ctx) {
           }
           try {
             if (url.pathname.endsWith('/auth/start')) return json(await startLogin(body.scopes))
+            if (url.pathname.endsWith('/auth/logout')) return json(await logout())
             return json(await finishLogin(body.deviceCode))
           } catch (error) {
             ctx.logger?.warn?.(`feishu-docs: auth route failed: ${String(error)}`)

@@ -28,7 +28,7 @@ function beacon(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.1.0', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.0', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -40,7 +40,7 @@ function report(phase, extra) {
     fetch('/x-feishu-docs/log', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phase, version: '2.1.0', ...(extra || {}) }),
+      body: JSON.stringify({ phase, version: '2.2.0', ...(extra || {}) }),
     }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -674,6 +674,12 @@ window.__ModuleLoader__.load({
      * Header chip plus its popover: the Session's documents, where the
      * conversation is, so no cross-Session navigation is involved.
      */
+    /** One character for a user whose avatar Feishu would not hand over. */
+    function initialOf(name) {
+      const text = String(name || '').trim()
+      return text ? Array.from(text)[0].toUpperCase() : '飞'
+    }
+
     /** An unresolved owner is shown as its id, shortened so it cannot eat the row. */
     function shortBy(by) {
       const text = String(by || '')
@@ -687,6 +693,7 @@ window.__ModuleLoader__.load({
       const [data, setData] = useState(null)
       const [doctor, setDoctor] = useState(null)
       const [authFlow, setAuthFlow] = useState({ busy: false, url: '', deviceCode: '', error: '' })
+      const [logoutAsk, setLogoutAsk] = useState(false)
       const [open, setOpen] = useState(false)
       const [rect, setRect] = useState(null)
       const [note, setNote] = useState('')
@@ -732,6 +739,37 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /**
+       * Sign out of Feishu.
+       *
+       * The first press only arms the button: losing the token costs the
+       * creator and title columns, so the second press is the one that does it.
+       */
+      const confirmLogout = async () => {
+        if (!logoutAsk) {
+          setLogoutAsk(true)
+          window.setTimeout(() => setLogoutAsk(false), 6000)
+          return
+        }
+        setLogoutAsk(false)
+        try {
+          const answer = await fetch('/x-feishu-docs/auth/logout', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-feishu-docs': 'popover' },
+            body: '{}',
+          }).then((r) => r.json())
+          if (!answer.ok) {
+            flash(answer.error || '退出失败', 3200)
+            return
+          }
+          flash('已退出飞书账号', 2600)
+          refreshDoctor()
+          loadSession(fullId, true).then((d) => setData(d)).catch(() => {})
+        } catch (error) {
+          flash(String(error), 3200)
+        }
+      }
+
       /** Finish it once the user says they confirmed in the browser. */
       const finishAuth = async () => {
         setAuthFlow((prev) => ({ ...prev, busy: true, error: '' }))
@@ -763,6 +801,7 @@ window.__ModuleLoader__.load({
       }, [fullId])
 
       const docs = useMemo(() => (data && data.docs) || [], [data])
+      const user = (doctor && doctor.user) || {}
 
       // Close on an outside press or Escape; both listeners live only while open.
       useEffect(() => {
@@ -878,6 +917,27 @@ window.__ModuleLoader__.load({
           .fd-setup-link { display:flex; align-items:center; gap:6px; font-size:11px; flex-wrap:wrap; }
           .fd-setup-link a { color:#3370FF; text-decoration:underline; word-break:break-all; }
           .fd-setup-err { font-size:11px; color:#B42318; }
+          .fd-user { display:flex; align-items:center; gap:8px; padding:9px 10px;
+                     border-bottom:1px solid color-mix(in srgb, currentColor 10%, transparent); }
+          .fd-user-avatar { flex:none; width:28px; height:28px; border-radius:50%; object-fit:cover; }
+          .fd-user-initial { display:flex; align-items:center; justify-content:center;
+                             font-size:12.5px; font-weight:600; color:#fff;
+                             background:linear-gradient(135deg, #3370FF, #7C4DFF); }
+          .fd-user-text { flex:1 1 auto; min-width:0; }
+          .fd-user-name { font-size:12.5px; font-weight:600; line-height:1.3;
+                          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          .fd-user-sub { font-size:10.5px; opacity:.55; line-height:1.3;
+                         overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          .fd-user-out { flex:none; height:22px; padding:0 9px; border-radius:11px; cursor:pointer;
+                         font:inherit; font-size:11px; color:#B42318;
+                         background:color-mix(in srgb, #F04438 10%, transparent);
+                         border:1px solid color-mix(in srgb, #F04438 35%, transparent); }
+          .fd-user-out:hover { background:color-mix(in srgb, #F04438 20%, transparent); }
+          .fd-user-armed { color:#fff; background:#D92D20; border-color:#D92D20; }
+          .fd-user-cancel { flex:none; height:22px; padding:0 8px; border-radius:11px; cursor:pointer;
+                            font:inherit; font-size:11px; color:inherit;
+                            background:color-mix(in srgb, currentColor 8%, transparent);
+                            border:1px solid color-mix(in srgb, currentColor 18%, transparent); }
           .fd-jump { display:inline-flex; align-items:center; justify-content:center; flex:none;
                      width:22px; height:22px; padding:0; border-radius:50%; cursor:pointer;
                      color:inherit; opacity:.72;
@@ -912,6 +972,32 @@ window.__ModuleLoader__.load({
         ),
         open && rect
           ? h('div', { ref: popRef, className: 'fd-pop', style: { top: `${rect.top}px`, right: `${rect.right}px` } },
+              h('div', { className: 'fd-user' },
+                user.avatar
+                  ? h('img', { className: 'fd-user-avatar', src: user.avatar, alt: '' })
+                  : h('div', { className: 'fd-user-avatar fd-user-initial' }, initialOf(user.name)),
+                h('div', { className: 'fd-user-text' },
+                  h('div', { className: 'fd-user-name' }, user.name || '未登录飞书'),
+                  h('div', { className: 'fd-user-sub' },
+                    user.available
+                      ? `${user.brand === 'lark' ? 'Lark' : '飞书'}个人用户`
+                      : '未授权，点下方「去授权」'),
+                ),
+                user.available
+                  ? h('button', {
+                      className: logoutAsk ? 'fd-user-out fd-user-armed' : 'fd-user-out',
+                      type: 'button',
+                      title: logoutAsk ? '再点一次确认退出' : '退出飞书账号',
+                      onClick: (e) => { e.preventDefault(); confirmLogout() },
+                    }, logoutAsk ? '确认退出' : '退出')
+                  : null,
+                logoutAsk
+                  ? h('button', {
+                      className: 'fd-user-cancel', type: 'button',
+                      onClick: (e) => { e.preventDefault(); setLogoutAsk(false) },
+                    }, '取消')
+                  : null,
+              ),
               h('div', { className: 'fd-pop-head' },
                 h('span', null, '本会话云文档'),
                 h('span', { style: { marginLeft: 'auto' } }, `${docs.length} 篇`),
@@ -985,7 +1071,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.1.0')
+        console.info('[feishu-docs] client apply, version 2.2.0')
         beacon('apply')
 
         try {
