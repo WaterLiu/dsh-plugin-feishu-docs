@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.2', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.2', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -390,12 +390,9 @@ window.__ModuleLoader__.load({
     let markKey = null
 
     /** How long the mark stays once it is on screen, and how long we hunt for it. */
-    const MARK_HOLD = 2000
+    const MARK_HOLD = 3000
     const MARK_LOOK = 4000
     const MARK_FADE = 380
-
-    /** A container this tall is a message, not the document inside it. */
-    const MARK_MAX_HEIGHT = 120
 
     /** Remove the mark and every timer/listener it installed. */
     function clearDocMark() {
@@ -464,19 +461,17 @@ window.__ModuleLoader__.load({
       }
 
       // 2. Any link in the transcript, in document order (the earliest mention).
-      const link = [...root.querySelectorAll('a[href]')].find(holds)
-      if (link) return link
+      //    Sized first: a link inside a collapsed section has no rect to paint.
+      const links = [...root.querySelectorAll('a[href]')].filter(holds)
+      const sized = links.find((el) => {
+        const box = el.getBoundingClientRect()
+        return box.width > 4 && box.height > 4
+      })
+      if (sized) return sized
+      if (links.length) return links[0]
 
-      // 3. Text without a link: the line that carries it.
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.nodeValue || !node.nodeValue.includes(token)) continue
-        const host = node.parentElement
-        if (!host || host.closest('pre, code')) continue
-        const box = host.getBoundingClientRect()
-        if (box.height > MARK_MAX_HEIGHT || box.width < 4) continue
-        return host
-      }
+      // Nothing else is marked: the request is to highlight the *document link*, not
+      // the paragraph or the turn it sits in. No link, no mark.
       return null
     }
 
@@ -657,39 +652,62 @@ window.__ModuleLoader__.load({
       return button && !button.disabled ? button : null
     }
 
+    /** Has the transcript actually grown since `before`? */
+    function grewSince(before) {
+      const scroller = transcript()
+      return Boolean(scroller) && scroller.scrollHeight > before + 4
+    }
+
+    /**
+     * Ask for one more page of history, and prove it arrived.
+     *
+     * Three loaders exist, and each must be *verified*: a history button can be
+     * present but disabled, and `loadOlder()` can resolve without adding anything.
+     * Returning "true" unverified is why jumps to old messages stopped loading at
+     * all — the top-of-scroll trigger was never reached.
+     *
+     * @returns whether the transcript actually grew.
+     */
     async function loadOlderOnce() {
-      // The transcript's own control is the dependable path: it is what a reader
-      // would press, and it reports progress through `data-chat-history`.
+      const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
+      const scroller = transcript()
+      const before = scroller ? scroller.scrollHeight : 0
+
       const button = historyButton()
       if (button) {
-        button.click()
-        report('jump-click-older', { state: document.querySelector('[data-chat-history]')?.getAttribute('data-chat-history') })
-        return true
+        try { button.click() } catch (error) { /* a click that throws changed nothing */ }
+        await sleep(260)
+        if (grewSince(before)) {
+          report('jump-click-older', { ok: true, state: document.querySelector('[data-chat-history]')?.getAttribute('data-chat-history') })
+          return true
+        }
       }
 
-      let settled = false
       let failure = ''
       try {
-        // Reading the scope-addressed service can itself throw for a context
-        // without a Session tag, so the access belongs inside this guard.
         // Two possible service names depending on the build; both are optional, so
         // this is a runtime lookup rather than an `inject` dependency (a missing
         // service in `inject` would block the whole plugin from activating).
         const api = (pluginCtx && (pluginCtx.conversation || pluginCtx.uiConversation)) || null
         if (api && typeof api.loadOlder === 'function') {
           await Promise.race([
-            Promise.resolve(api.loadOlder()).then(() => { settled = true }),
-            new Promise((resolve) => window.setTimeout(resolve, 1200)),
+            Promise.resolve(api.loadOlder()),
+            new Promise((resolve) => window.setTimeout(resolve, 1500)),
           ])
+          await sleep(200)
+          if (grewSince(before)) {
+            report('jump-loadolder', { ok: true, via: 'api' })
+            return true
+          }
         }
       } catch (error) {
         failure = String(error)
       }
-      // Nothing answered: this build loads history by reaching its top, so push it
-      // there. The caller restores the view afterwards.
-      const nudged = settled ? false : nudgeTop()
-      report('jump-loadolder', { settled, failure, nudged })
-      return settled || nudged
+
+      // This build loads history by reaching its top; the caller waits for growth.
+      const nudged = nudgeTop()
+      report('jump-loadolder', { ok: grewSince(before), nudged, failure })
+      return nudged || grewSince(before)
     }
 
     /**
@@ -760,23 +778,14 @@ window.__ModuleLoader__.load({
      */
     async function ensureFirstMention(doc, onProgress) {
       const token = String((doc && doc.u) || '').split('/').pop()
-      const anchorInTurn = () => {
-        const turn = Number(doc && doc.turn)
-        if (!turn) return null
-        for (const row of [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)]) {
-          const anchor = [...row.querySelectorAll('a[href]')].find((el) => {
-            const href = el.getAttribute('href') || ''
-            return href.includes(token) || (el.textContent || '').includes(token)
-          })
-          if (anchor) return anchor
-        }
-        return null
-      }
 
       // Already loaded: the block (one turn) is the shared key between the log and
       // the rows, so prefer it; the message id only helps on builds that render it.
+      // The row is the scroll target: a link can live inside a collapsed section,
+      // where it has no size and scrolling to it moves nothing. The anchor is only
+      // chosen afterwards, for the mark.
       const ready = findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq)
-      if (ready) return anchorInTurn() || ready
+      if (ready) return ready
 
       // Page older history until the recorded turn is mounted. Loading means the
       // transcript has to reach its top (this build's own trigger), so the original
@@ -801,7 +810,7 @@ window.__ModuleLoader__.load({
             attempt: attempt + 1, block: doc.block, viaTurn: Boolean(findTurnRow(doc.turn)),
             mid: Boolean(doc.mid), domTurns: turnRange(),
           })
-          return anchorInTurn() || row
+          return row
         }
         // Two attempts without the transcript growing: nothing more is coming.
         if (scroller && scroller.scrollHeight === heightBefore && attempt > 0) break
@@ -1278,7 +1287,7 @@ window.__ModuleLoader__.load({
         const target = await ensureFirstMention(doc, (n) => flash(`正在加载更早的消息…第 ${n} 次`, 20000))
         if (!target) {
           copyText(`${doc.t || ''} · 第 ${doc.turn || '?'} 轮 · ${doc.hm || ''}`)
-          flash(`第 ${doc.turn} 轮仍未加载 · 已复制位置`, 2600)
+          flash(`第 ${doc.turn} 轮仍未加载（当前 ${turnRange() || '无'} 轮）· 已复制位置`, 3200)
           return
         }
         const exact = Boolean(findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq))
