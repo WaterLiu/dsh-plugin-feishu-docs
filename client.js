@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1640,9 +1640,10 @@ window.__ModuleLoader__.load({
                 // Session has none — the empty state explains that.
                 docs.length
                   ? h('div', { className: 'fd-user-count' },
-                      h('div', { className: 'fd-user-count-label' }, '本会话云文档'),
+                      // Value first, label under it: a metric reads count-then-caption.
                       h('div', { className: 'fd-user-count-value' },
                         shown.length === docs.length ? `${docs.length} 篇` : `${shown.length} / ${docs.length} 篇`),
+                      h('div', { className: 'fd-user-count-label' }, '本会话云文档'),
                     )
                   : null,
                 user.available
@@ -1786,7 +1787,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.4.0')
+        console.info('[feishu-docs] client apply, version 3.4.1')
         beacon('apply')
 
         try {
