@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.2', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.3', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.2', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.3', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -423,56 +423,45 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The element that shows a document, tight enough to paint.
+     * Where a document lives on screen: the link, and the row it sits in.
      *
-     * A link is the best target — it is the document, it is small, and it scrolls
-     * with the message, so no coordinates are involved at all. Without a link, the
-     * first text node holding the token is used, provided its parent is a line and
-     * not the whole message. Code is skipped: a URL inside a fence or backticks is
-     * a log line, not the document the chat shows.
+     * `[data-chat-turn]` is on hundreds of elements — steps, tool rows, the turn
+     * itself — not just the message. Picking the first one gave a 27px step row, so
+     * scrolling moved a few hundred pixels and looked like nothing had happened.
+     * The block is therefore found by the token, and among those matches the link
+     * with a real rect wins, then the tallest row.
      *
-     * @param doc - the document the jump targeted.
-     * @returns an element, or null when nothing tight enough exists.
+     * @param doc - the document, with `turn` recorded at its first mention.
+     * @returns `{ anchor, row }` — either may be null.
      */
-    function docElement(doc) {
+    function docTarget(doc) {
       const token = String((doc && doc.u) || '').split('/').pop()
-      if (!token) return null
-      const root = transcript() || document
-      const holds = (el) => {
-        const href = el.getAttribute && el.getAttribute('href')
-        return Boolean((href && href.includes(token)) || (el.textContent || '').includes(token))
-      }
-
-      // 1. The exact message that first showed it, by message id.
-      const first = rowByMessageId(doc && doc.mid, doc && doc.seq)
-      if (first) {
-        const anchor = [...first.querySelectorAll('a[href]')].find(holds)
-        if (anchor) return anchor
-      }
-
-      // 1b. Its turn, when the row keys do not carry the id: the recorded turn is
-      //     still the first mention, and rows for it are cheap to query.
-      const turn = Number(doc && doc.turn)
-      if (turn) {
-        for (const row of [...root.querySelectorAll(`[data-chat-turn="${turn}"]`)]) {
-          const anchor = [...row.querySelectorAll('a[href]')].find(holds)
-          if (anchor) return anchor
-        }
-      }
-
-      // 2. Any link in the transcript, in document order (the earliest mention).
-      //    Sized first: a link inside a collapsed section has no rect to paint.
-      const links = [...root.querySelectorAll('a[href]')].filter(holds)
-      const sized = links.find((el) => {
+      if (!token) return { anchor: null, row: null }
+      const sized = (el) => {
         const box = el.getBoundingClientRect()
         return box.width > 4 && box.height > 4
-      })
-      if (sized) return sized
-      if (links.length) return links[0]
+      }
+      const holds = (el) => {
+        const href = el.getAttribute('href') || ''
+        return href.includes(token) || (el.textContent || '').includes(token)
+      }
 
-      // Nothing else is marked: the request is to highlight the *document link*, not
-      // the paragraph or the turn it sits in. No link, no mark.
-      return null
+      const turn = Number(doc && doc.turn)
+      const scoped = turn ? [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)] : []
+      const roots = scoped.length ? scoped : [...document.querySelectorAll('[data-chat-turn]')]
+
+      const anchor = roots
+        .flatMap((root) => [...root.querySelectorAll('a[href]')])
+        .find((el) => sized(el) && holds(el))
+      if (anchor) return { anchor, row: anchor.closest('[data-chat-turn]') }
+
+      const rows = roots.filter((root) => holds(root) && sized(root))
+      rows.sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)
+      if (rows.length) return { anchor: null, row: rows[0] }
+
+      // Last resort: an exact message row, when the token is not in the rendered text.
+      const exact = rowByMessageId(doc && doc.mid, doc && doc.seq)
+      return { anchor: null, row: exact }
     }
 
     /** Fade the mark out, then forget it. */
@@ -501,7 +490,8 @@ window.__ModuleLoader__.load({
 
       const paint = () => {
         if (holding && marked.length && marked.every((el) => el.isConnected && el.classList.contains('fd-doc-hit'))) return
-        const el = docElement(doc)
+        const { anchor } = docTarget(doc)
+        const el = anchor
         if (!el) {
           if (Date.now() > deadline) {
             if (!reported) report('mark-miss', { token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
@@ -777,19 +767,13 @@ window.__ModuleLoader__.load({
      * @returns the element to scroll to, or null when it never loads.
      */
     async function ensureFirstMention(doc, onProgress) {
-      const token = String((doc && doc.u) || '').split('/').pop()
+      // Ready means "the block that holds the document is rendered", not merely "a
+      // row with that turn exists": turns carry steps and tool rows too.
+      const ready = docTarget(doc)
+      if (ready.anchor || ready.row) return ready
 
-      // Already loaded: the block (one turn) is the shared key between the log and
-      // the rows, so prefer it; the message id only helps on builds that render it.
-      // The row is the scroll target: a link can live inside a collapsed section,
-      // where it has no size and scrolling to it moves nothing. The anchor is only
-      // chosen afterwards, for the mark.
-      const ready = findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq)
-      if (ready) return ready
-
-      // Page older history until the recorded turn is mounted. Loading means the
-      // transcript has to reach its top (this build's own trigger), so the original
-      // position is remembered and restored if the target never arrives.
+      // Loading means the transcript has to reach its top (this build's trigger), so
+      // the original position is remembered and restored if the block never arrives.
       const scroller = transcript()
       const restore = scroller ? scroller.scrollTop : 0
       const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
@@ -798,33 +782,31 @@ window.__ModuleLoader__.load({
         onProgress?.(attempt + 1)
         const heightBefore = scroller ? scroller.scrollHeight : 0
         await loadOlderOnce()
-        // Wait for the target to mount, or for a page to actually arrive.
         for (let wait = 0; wait < 8; wait += 1) {
           await sleep(120)
-          if (findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq)) break
+          const probe = docTarget(doc)
+          if (probe.anchor || probe.row) break
           if (scroller && scroller.scrollHeight !== heightBefore) break
         }
-        const row = findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq)
-        if (row) {
+        const found = docTarget(doc)
+        if (found.anchor || found.row) {
           report('jump-first-found', {
-            attempt: attempt + 1, block: doc.block, viaTurn: Boolean(findTurnRow(doc.turn)),
+            attempt: attempt + 1, block: doc.block, anchor: Boolean(found.anchor),
             mid: Boolean(doc.mid), domTurns: turnRange(),
           })
-          return row
+          return found
         }
-        // Two attempts without the transcript growing: nothing more is coming.
         if (scroller && scroller.scrollHeight === heightBefore && attempt > 0) break
       }
 
-      // Could not reach it: put the reader back where they were, then fall back to
-      // whatever is loaded — never leave the transcript parked at the top.
+      // Could not reach it: put the reader back, then report what is there.
       if (scroller) {
         try { scroller.scrollTop = restore } catch (error) { /* ignore */ }
       }
-      const fallback = findTurnRow(doc.turn) || docElement(doc)
+      const fallback = docTarget(doc)
       report('jump-first-exhausted', {
-        found: Boolean(fallback), block: doc && doc.block, turn: doc && doc.turn,
-        mid: Boolean(doc && doc.mid), domTurns: turnRange(), keys: keySample(),
+        found: Boolean(fallback.anchor || fallback.row), block: doc && doc.block,
+        turn: doc && doc.turn, mid: Boolean(doc && doc.mid), domTurns: turnRange(), keys: keySample(),
       })
       return fallback
     }
@@ -1285,15 +1267,17 @@ window.__ModuleLoader__.load({
       const jumpTo = async (doc) => {
         flash('正在定位到首次出现的位置…', 20000)
         const target = await ensureFirstMention(doc, (n) => flash(`正在加载更早的消息…第 ${n} 次`, 20000))
-        if (!target) {
+        // The link is the thing to centre; the row is only a fallback for a block
+        // whose link is not rendered.
+        const focus = target.anchor || target.row
+        if (!focus) {
           copyText(`${doc.t || ''} · 第 ${doc.turn || '?'} 轮 · ${doc.hm || ''}`)
           flash(`第 ${doc.turn} 轮仍未加载（当前 ${turnRange() || '无'} 轮）· 已复制位置`, 3200)
           return
         }
-        const exact = Boolean(findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq))
-        await revealRow(target, doc)
+        await revealRow(focus, doc)
         markDocument(doc)
-        flash(exact ? `已定位到第 ${doc.turn} 轮` : '已定位到最近可加载的位置', 2400)
+        flash(target.anchor ? `已定位到第 ${doc.turn} 轮的文档链接` : `已定位到第 ${doc.turn} 轮`, 2600)
       }
 
       const toggle = () => {
@@ -1620,7 +1604,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 2.5.0')
+        console.info('[feishu-docs] client apply, version 3.0.3')
         beacon('apply')
 
         try {
