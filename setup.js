@@ -58,21 +58,131 @@ async function zstdState() {
   return { zstd: binary ? 'cli' : null, zstdPath: binary }
 }
 
-/** Who is signed in, till when, and which of our scopes the token carries. */
+/** A timestamp from the CLI, if it parses and lies in the future. */
+function isFuture(value) {
+  const at = Date.parse(String(value || ''))
+  return Number.isFinite(at) && at > Date.now()
+}
+
+/** Who is signed in, till when, and whether it can still renew itself. */
 async function authState() {
-  const state = { available: false, userName: '', openId: '', brand: 'feishu', expiresAt: '', missing: [], required: REQUIRED_SCOPES, nice: NICE_SCOPES }
+  const state = {
+    available: false, userName: '', openId: '', brand: 'feishu',
+    expiresAt: '', refreshExpiresAt: '', tokenStatus: '', canRefresh: false,
+    missing: [], required: REQUIRED_SCOPES, nice: NICE_SCOPES,
+  }
   const status = await invoke(['auth', 'status', '--json'])
   if (status && status.brand) state.brand = status.brand
   const user = status && status.identities && status.identities.user
   if (!user) return state
-  state.available = Boolean(user.available) && user.tokenStatus === 'valid'
   state.userName = user.userName || ''
   state.openId = user.openId || ''
   state.expiresAt = user.expiresAt || ''
+  state.refreshExpiresAt = user.refreshExpiresAt || ''
+  state.tokenStatus = user.tokenStatus || ''
+  state.available = Boolean(user.available) && user.tokenStatus === 'valid'
+  // An expired access token is not a lost login: the refresh token lives for a
+  // week and the CLI renews it on the next authorized call. `canRefresh` is what
+  // tells "needs renewing" apart from "needs the user again".
+  state.canRefresh = !state.available && Boolean(user.available) && isFuture(user.refreshExpiresAt)
   if (!state.available) return state
   const checked = await invoke(['auth', 'check', '--scope', [...REQUIRED_SCOPES, ...NICE_SCOPES].join(' '), '--json'])
   if (checked) state.missing = Array.isArray(checked.missing) ? checked.missing : []
   return state
+}
+
+/** Renewal is cheap, but not free: one probe per minute at most. */
+const PROBE_COOLDOWN = 60 * 1000
+/** After a failure, back off — a revoked token must not be retried in a loop. */
+const PROBE_MAX_BACKOFF = 10 * 60 * 1000
+
+/** One renewal at a time: refresh tokens rotate, so two probes would burn each other. */
+let probeFlight = null
+/** `{ at, ok, via, reason, tookMs, failures, nextAt }` — for the trace and the UI. */
+let probeState = { at: 0, ok: null, via: '', reason: '', tookMs: 0, failures: 0, nextAt: 0 }
+
+/** The last renewal attempt, without any token material. */
+export function lastProbe() {
+  return { ...probeState }
+}
+
+/** Turn a failed CLI run into a reason a person can act on. */
+function classifyProbeFailure(text) {
+  const raw = String(text || '')
+  if (/invalid_grant|refresh[ _-]?token|expired|revoked|invalid_token|unauthorized/i.test(raw)) return 'expired'
+  if (/keychain|operation not permitted|EPERM|EACCES/i.test(raw)) return 'storage'
+  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|network|socket hang up|getaddrinfo/i.test(raw)) return 'network'
+  return 'unknown'
+}
+
+/**
+ * Renew the access token without bothering the user.
+ *
+ * `lark-cli` refreshes implicitly — the next authorized call after expiry spends
+ * the refresh token and returns a fresh two-hour access token. The plugin
+ * therefore only has to make such a call. Two probes are tried because the first
+ * one's behaviour on an expired token is a build detail: `auth check` (read only),
+ * then the lightest authorized endpoint there is, `authen/v1/user_info`, which the
+ * avatar code already uses.
+ *
+ * Success is not "the command exited 0" — it is `auth status` reporting a valid
+ * token whose expiry actually moved. Anything else is a failure and is classified,
+ * because "network is down" must never look like "you have to log in again".
+ *
+ * @param options - `force` skips the cooldown (used right after a login).
+ * @returns `{ ok, via, reason, tookMs, state }` — `state` is the fresh auth state.
+ */
+export async function refreshAuth({ force = false } = {}) {
+  if (probeFlight) return probeFlight
+  if (!force && Date.now() < probeState.nextAt) {
+    return { ok: false, via: '', reason: 'cooldown', tookMs: 0, state: await authState() }
+  }
+
+  probeFlight = (async () => {
+    const started = Date.now()
+    const before = await authState()
+    if (!before.canRefresh) {
+      probeState = { ...probeState, at: started, ok: before.available, via: '', reason: before.available ? 'fresh' : 'expired', tookMs: Date.now() - started, nextAt: 0 }
+      return { ok: before.available, via: '', reason: probeState.reason, tookMs: probeState.tookMs, state: before }
+    }
+
+    const scopes = [...REQUIRED_SCOPES, ...NICE_SCOPES].join(' ')
+    let via = ''
+    let detail = ''
+
+    const check = await run(['auth', 'check', '--scope', scopes, '--json'], 20000)
+    if (check.code === 0) via = 'auth-check'
+    else detail = check.text
+
+    if (!via) {
+      const probe = await run(['api', 'GET', '/open-apis/authen/v1/user_info'], 20000)
+      if (probe.code === 0) via = 'user-info'
+      else detail = `${detail} ${probe.text}`
+    }
+
+    // The only proof of renewal: a valid token whose expiry moved forward.
+    const after = await authState()
+    const movedForward = Date.parse(after.expiresAt || '') > Date.parse(before.expiresAt || '') || (!before.expiresAt && Boolean(after.expiresAt))
+    const ok = after.available && movedForward
+    const reason = ok ? '' : classifyProbeFailure(detail) || (via ? 'unknown' : 'expired')
+
+    probeState = {
+      at: started,
+      ok,
+      via,
+      reason,
+      tookMs: Date.now() - started,
+      failures: ok ? 0 : probeState.failures + 1,
+      nextAt: ok ? started + PROBE_COOLDOWN : started + Math.min(PROBE_MAX_BACKOFF, PROBE_COOLDOWN * 2 ** Math.min(probeState.failures + 1, 4)),
+    }
+    return { ok, via, reason, tookMs: probeState.tookMs, state: after }
+  })()
+
+  try {
+    return await probeFlight
+  } finally {
+    probeFlight = null
+  }
 }
 
 /**
@@ -81,7 +191,16 @@ async function authState() {
  * @returns the readiness report served as `doctor.json`.
  */
 export async function diagnose() {
-  const [zstd, bin, auth] = await Promise.all([zstdState(), which('lark-cli'), authState()])
+  const [zstd, bin, first] = await Promise.all([zstdState(), which('lark-cli'), authState()])
+
+  // An expired access token is renewable for a week. Try that before telling
+  // anyone they are signed out — the CLI renews on the next authorized call.
+  let probe = null
+  let auth = first
+  if (bin && first.canRefresh) {
+    probe = await refreshAuth()
+    auth = probe.state || (await authState())
+  }
 
   const items = []
   items.push({
@@ -103,8 +222,15 @@ export async function diagnose() {
   if (bin) {
     const missingRequired = auth.missing.filter((scope) => REQUIRED_SCOPES.includes(scope))
     const missingNice = auth.missing.filter((scope) => NICE_SCOPES.includes(scope))
+    // Why it is unavailable decides what to advise: a network blip must not tell
+    // someone to authorize again.
+    const renewReason = probe && !probe.ok ? probe.reason : ''
     const detail = !auth.available
-      ? '未登录或登录已失效：创建者、真实标题、已删除标记都拿不到'
+      ? renewReason === 'network'
+        ? '网络异常，暂时读不到飞书；稍后会自动重试，不需要重新授权'
+        : renewReason === 'storage'
+          ? '续期后的登录凭据无法写入 keychain：创建者、真实标题、已删除标记都拿不到，可能需要重新授权'
+          : '未登录或登录已失效：创建者、真实标题、已删除标记都拿不到'
       : missingRequired.length
         ? `缺少必需权限：${missingRequired.join('、')}`
         : missingNice.length
@@ -152,7 +278,13 @@ export async function diagnose() {
     zstdPath: zstd.zstdPath,
     node: process.version,
     larkCli: bin,
-    auth: { ...auth, missingRequired: auth.missing.filter((scope) => REQUIRED_SCOPES.includes(scope)) },
+    auth: {
+      ...auth,
+      missingRequired: auth.missing.filter((scope) => REQUIRED_SCOPES.includes(scope)),
+      // `state` is the one word the popover and the trace care about.
+      state: auth.available ? (probe && probe.ok ? 'refreshed' : 'valid') : 'needs_login',
+      probe: probe ? { ok: probe.ok, via: probe.via, reason: probe.reason, tookMs: probe.tookMs } : null,
+    },
   }
 }
 

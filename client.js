@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.2', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.5.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.2', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.5.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1787,7 +1787,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.4.2')
+        console.info('[feishu-docs] client apply, version 3.5.0')
         beacon('apply')
 
         try {

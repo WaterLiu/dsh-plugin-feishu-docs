@@ -55,6 +55,23 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 翻页是**带方向**的：目标轮次在已加载范围之上就往上翻（触达顶部加载旧消息），在范围之下就往下翻（触达底部加载新消息）——渲染窗口是双向滑动的，只会往上翻的话，"先翻到最早、再点后面某条"就永远追不到。目标轮次已在范围内但链接没渲染（例如折叠块）时，直接落到块本身，不再空转。
 
+## 授权续期（不再动不动要求重新登录）
+
+飞书 token 有两层：**access token 2 小时**、**refresh token 7 天**（每次续期顺延）。`lark-cli` 的刷新是隐式的——下次"需要鉴权的调用"发生时，它用 refresh token 换新。
+
+插件现在按这个行为工作：
+
+| 场景 | 行为 |
+|---|---|
+| `tokenStatus: valid` | 直接用，不做额外调用 |
+| 过期但 `refreshExpiresAt` 还在将来（可续期） | **先续期再判定**：`auth check`（只读）→ 失败再试 `/authen/v1/user_info`；只有 `auth status` 的**到期时间真的往后推了**才算成功 |
+| 续期成功 | 视为已登录，界面无变化（静默） |
+| 续期失败·网络类 | 提示「网络异常，稍后自动重试」，**不要求重新授权** |
+| 续期失败·凭据写入被拒（keychain） | 提示可能需要重新授权（这是唯一该点的场景之一） |
+| refresh 过期 / 已被吊销 | 提示「去授权」 |
+
+另外宿主每隔 **90 分钟**做一次轻量保活探针（远低于 2 小时），所以隔夜再用也不需要重新登录；退出登录会停掉保活。每次判定都会往追踪日志写一条 `auth-state`（含 `state`/`tokenStatus`/`probe.reason`，**不含任何 token**），下一次"为什么又要登录"可以直接查证。
+
 ## 更快的跳转取决于 DSH 的一个属性
 
 聊天行目前只带 `data-chat-node-key` 和 `data-chat-turn`，没有消息 id；而它背后的视图节点其实有 `id` 和 `anchorSeq`。要让跳转"一次到位、不用翻历史"，需要 DSH 在行上多输出两个属性——具体位置、改动内容和风险见 [`contrib/upstream-data-chat-node-id.md`](contrib/upstream-data-chat-node-id.md)。
@@ -169,7 +186,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.4.2
+[feishu-docs] client apply, version 3.5.0
 [feishu-docs] header chip registered
 ```
 
