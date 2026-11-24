@@ -566,6 +566,24 @@ window.__ModuleLoader__.load({
       return Math.abs(scroller.scrollTop - before) > 2
     }
 
+    /**
+     * Ask for newer history by moving the transcript to its bottom.
+     *
+     * The window slides both ways: after paging to the start, rows near the tail are
+     * unloaded, so a jump to a *later* turn has to travel down. Paging only upwards
+     * left those jumps stuck at "not loaded".
+     *
+     * @returns whether the transcript actually moved.
+     */
+    function nudgeBottom() {
+      const scroller = transcript()
+      if (!scroller) return false
+      const before = scroller.scrollTop
+      scroller.scrollTop = scroller.scrollHeight
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
+      return Math.abs(scroller.scrollTop - before) > 2
+    }
+
     /** The nearest scrollable ancestor of a row, else the transcript itself. */
     function scrollerFor(row) {
       let parent = row && row.parentElement
@@ -722,6 +740,15 @@ window.__ModuleLoader__.load({
       return last
     }
 
+    /** The lowest and highest turn rendered right now, or null. */
+    function turnBounds() {
+      const turns = [...document.querySelectorAll('[data-chat-turn]')]
+        .map((el) => Number(el.getAttribute('data-chat-turn')))
+        .filter((n) => Number.isFinite(n))
+      if (!turns.length) return null
+      return { min: Math.min(...turns), max: Math.max(...turns) }
+    }
+
     /** Which turn numbers are actually rendered right now, as a range. */
     function turnRange() {
       const turns = [...document.querySelectorAll('[data-chat-turn]')]
@@ -779,10 +806,25 @@ window.__ModuleLoader__.load({
       const restore = scroller ? scroller.scrollTop : 0
       const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
-      for (let attempt = 0; attempt < 12; attempt += 1) {
+      for (let attempt = 0; attempt < 16; attempt += 1) {
         onProgress?.(attempt + 1)
         const heightBefore = scroller ? scroller.scrollHeight : 0
-        await loadOlderOnce()
+        // Direction matters: a target below the loaded window needs newer history,
+        // and this build loads it by reaching the bottom.
+        const bounds = turnBounds()
+        const turn = Number(doc.turn)
+        // The turn is rendered but its link is not (a collapsed block, say): no
+        // amount of paging helps, so land on the block itself.
+        if (bounds && turn >= bounds.min && turn <= bounds.max) {
+          const row = findTurnRow(turn)
+          if (row) {
+            report('jump-block-only', { turn, block: doc.block })
+            return { anchor: null, row }
+          }
+        }
+        const wantNewer = bounds && turn > bounds.max
+        if (wantNewer) nudgeBottom()
+        else await loadOlderOnce()
         for (let wait = 0; wait < 8; wait += 1) {
           await sleep(120)
           const probe = docTarget(doc, true)

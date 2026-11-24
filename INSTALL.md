@@ -53,6 +53,8 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 如果跳转落点不对，追踪日志里的 `domTurns` 会给出当前渲染的轮次范围，可直接判断"日志的 turn 编号"和"DOM 的 turn 编号"是否同一套。
 
+翻页是**带方向**的：目标轮次在已加载范围之上就往上翻（触达顶部加载旧消息），在范围之下就往下翻（触达底部加载新消息）——渲染窗口是双向滑动的，只会往上翻的话，"先翻到最早、再点后面某条"就永远追不到。目标轮次已在范围内但链接没渲染（例如折叠块）时，直接落到块本身，不再空转。
+
 ## 更快的跳转取决于 DSH 的一个属性
 
 聊天行目前只带 `data-chat-node-key` 和 `data-chat-turn`，没有消息 id；而它背后的视图节点其实有 `id` 和 `anchorSeq`。要让跳转"一次到位、不用翻历史"，需要 DSH 在行上多输出两个属性——具体位置、改动内容和风险见 [`contrib/upstream-data-chat-node-id.md`](contrib/upstream-data-chat-node-id.md)。
