@@ -10,6 +10,8 @@
  * `FEISHU_DOCS_STATE_DIR` overrides where the cache lives (tests point it at a
  * temporary directory); otherwise it sits beside the other plugin caches in
  * `~/.dsh`.
+ *
+ * @author WaterLiu
  */
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -33,6 +35,9 @@ const ALLOWED = /(^|\.)(feishucdn\.com|feishu\.cn|larksuite\.com|larksuitecdn\.c
 /** In-flight refresh, so concurrent opens share one download. */
 let refreshing = null
 
+/**
+ * The cached avatar's metadata (`{ openId, url, contentType, at }`), or null.
+ */
 async function readMeta() {
   try {
     return JSON.parse(await readFile(META, 'utf8'))
@@ -41,6 +46,9 @@ async function readMeta() {
   }
 }
 
+/**
+ * The cached avatar bytes, or null when nothing has been downloaded yet.
+ */
 async function readImage() {
   try {
     return await readFile(IMAGE)
@@ -49,6 +57,14 @@ async function readImage() {
   }
 }
 
+/**
+ * Store the avatar and its metadata together, so they cannot disagree.
+ *
+ * @param openId - whose avatar it is; a different user invalidates the cache.
+ * @param url - where it came from, for the refresh check.
+ * @param contentType - what the bytes are.
+ * @param bytes - the image itself.
+ */
 async function writeCache(openId, url, contentType, bytes) {
   await mkdir(dirname(IMAGE), { recursive: true })
   await writeFile(IMAGE, bytes)

@@ -13,6 +13,8 @@
  * account for, one name lookup per distinct person. Answers are cached in
  * `~/.dsh/feishu-docs-owners.json` and re-asked at most every {@link TTL}, so a
  * deleted-then-restored document corrects itself.
+ *
+ * @author WaterLiu
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -45,6 +47,9 @@ async function mapLimit(items, limit, task) {
   await Promise.all(workers)
 }
 
+/**
+ * Read the metadata cache, tolerating a missing or corrupt file.
+ */
 async function loadCache() {
   try {
     const cache = JSON.parse(await readFile(CACHE, 'utf8'))
@@ -54,6 +59,11 @@ async function loadCache() {
   }
 }
 
+/**
+ * Write the metadata cache; a failure costs one lookup, so it is swallowed.
+ *
+ * @param cache - `{ tokens, names, failures }`.
+ */
 async function saveCache(cache) {
   try {
     await mkdir(dirname(CACHE), { recursive: true })

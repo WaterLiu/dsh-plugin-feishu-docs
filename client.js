@@ -13,6 +13,8 @@
  *   transcript scrollport;
  * - DSH exposes no public scroll-to-turn or switch-session API, so a row outside
  *   this Session copies a citation instead of navigating.
+ *
+ * @author WaterLiu
  */
 /**
  * Best-effort beacon to the host half, so loading can be diagnosed headlessly.
@@ -25,7 +27,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.5.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.5.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +36,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.5.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.5.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -75,6 +77,16 @@ window.__ModuleLoader__.load({
      * mentioned a minute ago is already there.
      */
     const sessionCache = new Map()
+    /**
+     * The documents of one Session, fetched once and reused.
+     *
+     * The promise itself is cached, so the poll and the first paint share a single
+     * request; `force` drops it when the history was paged.
+     *
+     * @param sessionId - the Session whose log the host should read.
+     * @param force - ignore the cached promise.
+     * @returns the host's `{ docs, scanned, scannedAt }` payload.
+     */
     function loadSession(sessionId, force) {
       if (!sessionId) return Promise.resolve({ docs: [] })
       const cached = sessionCache.get(sessionId)
@@ -181,6 +193,12 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * The heading a day group shows: "今天", or "M月D日".
+     *
+     * @param day - `YYYY-MM-DD` as recorded by the scan.
+     * @returns the label to render.
+     */
     function dayLabel(day) {
       if (!day) return '未知日期'
       const now = new Date()
@@ -196,24 +214,7 @@ window.__ModuleLoader__.load({
       return document.querySelector('[data-conversation-scroll]')
     }
 
-    /** What the page currently has, for the jump report. */
-    function pageFacts() {
-      const turns = [...document.querySelectorAll('[data-chat-turn]')]
-        .map((el) => Number(el.getAttribute('data-chat-turn')))
-        .filter((v) => !Number.isNaN(v))
-      const scroller = transcript()
-      return {
-        rows: turns.length,
-        minTurn: turns.length ? Math.min(...turns) : null,
-        maxTurn: turns.length ? Math.max(...turns) : null,
-        scroller: Boolean(scroller),
-        scrollTop: scroller ? Math.round(scroller.scrollTop) : null,
-        scrollHeight: scroller ? scroller.scrollHeight : null,
-        clientHeight: scroller ? scroller.clientHeight : null,
-      }
-    }
-
-    /** A row that actually occupies space; paging anchors have zero height. */
+        /** A row that actually occupies space; paging anchors have zero height. */
     function isVisibleRow(el) {
       if (!el) return false
       try {
@@ -266,61 +267,7 @@ window.__ModuleLoader__.load({
       return String(text || '').replace(/[\s"'「」『』《》|]+/g, '')
     }
 
-    /**
-     * The row that actually mentions the document.
-     *
-     * Keys are unreliable (a tool row's key may carry a call id, not the message
-     * id) and the transcript virtualizes, so this falls back to the document's
-     * own title: scan the turn's mounted rows, then scroll through the turn until
-     * the row carrying that title is mounted.
-     *
-     * @param doc - index row with `turn`, `t` and optional `mid`.
-     * @param onProgress - called with the scroll step while searching.
-     * @returns the matching row, or the turn's input row.
-     */
-    async function findDocRowDeep(doc, onProgress) {
-      const exact = findDocRow(doc)
-      const key = doc && (doc.cid || doc.mid)
-      if (exact && key) {
-        const nodeKey = String(exact.getAttribute('data-chat-node-key') || exact.getAttribute('data-chat-anchor-key') || '')
-        if (nodeKey.includes(key)) return exact
-      }
-
-      const needle = normalize(doc && doc.t).slice(0, 20)
-      const turn = Number(doc && doc.turn)
-      const scan = () => {
-        if (!needle) return null
-        const rows = [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)].filter(isVisibleRow)
-        return rows.find((row) => normalize(row.textContent).includes(needle)) || null
-      }
-
-      const mounted = scan()
-      if (mounted) return mounted
-
-      const first = findTurnRow(turn)
-      if (!first) return null
-      revealRow(first)
-      await new Promise((resolve) => window.setTimeout(resolve, 120))
-
-      for (let step = 0; step < 12; step += 1) {
-        const found = scan()
-        if (found) return found
-        onProgress?.(step + 1)
-        const scroller = transcript()
-        if (!scroller) break
-        const before = scroller.scrollTop
-        scroller.scrollTop = Math.min(before + Math.round(scroller.clientHeight * 0.7), scroller.scrollHeight)
-        await new Promise((resolve) => window.setTimeout(resolve, 120))
-        if (scroller.scrollTop === before) break
-        const turns = [...document.querySelectorAll('[data-chat-turn]')]
-          .map((el) => Number(el.getAttribute('data-chat-turn')))
-          .filter((v) => !Number.isNaN(v))
-        if (turns.length && Math.min(...turns) > turn) break
-      }
-      return findTurnRow(turn)
-    }
-
-    /**
+        /**
      * Centre one row inside the transcript.
      *
      * `scrollIntoView` is unreliable here: the transcript clips overflow and the
@@ -343,6 +290,12 @@ window.__ModuleLoader__.load({
 
     /** One injected stylesheet for the document mark. */
     let markStyles = false
+    /**
+     * Inject the highlight stylesheet once.
+     *
+     * Both engines need it: `::highlight()` for the Custom Highlight API, the layer
+     * classes for the overlay fallback.
+     */
     function ensureMarkStyles() {
       if (markStyles) return
       markStyles = true
@@ -400,22 +353,16 @@ window.__ModuleLoader__.load({
     /** The highlight layer, and the timers that place and retire it. */
     let markNode = null
     let markTimer = null
-    let markFrame = 0
     let markFollowers = []
 
-    /** How long we look for the link, and the overlay's fade. */
+    /** How long we look for the link before giving up. */
     const MARK_LOOK = 5000
-    const MARK_FADE = 380
 
     /** Remove the highlight and every timer/listener it installed. */
     function clearDocMark() {
       if (markTimer) {
         window.clearInterval(markTimer)
         markTimer = null
-      }
-      if (markFrame) {
-        window.cancelAnimationFrame(markFrame)
-        markFrame = 0
       }
       for (const [event, handler, options] of markFollowers) {
         window.removeEventListener(event, handler, options || true)
@@ -845,28 +792,7 @@ window.__ModuleLoader__.load({
       return nudged || grewSince(before)
     }
 
-    /**
-     * Page history back until the given turn renders.
-     *
-     * @param turn - 1-based turn number from the index.
-     * @param onProgress - called with the attempt count while loading.
-     * @returns the row, or null when history runs out.
-     */
-    async function ensureTurnLoaded(turn, onProgress) {
-      for (let attempt = 0; attempt < 90; attempt += 1) {
-        const row = findTurnRow(turn)
-        if (row) { report('jump-found', { attempt, ...pageFacts() }); return row }
-        onProgress?.(attempt + 1)
-        report('jump-attempt', { attempt: attempt + 1, turn, ...pageFacts() })
-        await loadOlderOnce()
-        await new Promise((resolve) => window.setTimeout(resolve, 260))
-      }
-      const last = findTurnRow(turn)
-      report('jump-exhausted', { turn, found: Boolean(last), ...pageFacts() })
-      return last
-    }
-
-    /** The lowest and highest turn rendered right now, or null. */
+        /** The lowest and highest turn rendered right now, or null. */
     function turnBounds() {
       const turns = [...document.querySelectorAll('[data-chat-turn]')]
         .map((el) => Number(el.getAttribute('data-chat-turn')))
@@ -982,6 +908,11 @@ window.__ModuleLoader__.load({
       return fallback
     }
 
+    /**
+     * Put text on the clipboard, with a fallback for engines without the async API.
+     *
+     * @param text - what to copy (a document's title, turn and time).
+     */
     function copyText(text) {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).catch(() => {})
@@ -1152,6 +1083,15 @@ window.__ModuleLoader__.load({
       return `${text.slice(0, 11)}…${text.slice(-4)}`
     }
 
+    /**
+     * The chip in the conversation header, and the popover it opens.
+     *
+     * Everything the popover knows is derived here: the Session id, its documents
+     * (polled), the account, the readiness report, the search and creator filters,
+     * and the jump that scrolls to a document's first mention.
+     *
+     * @param props - the slot's standard props; `sessionId` names the Session.
+     */
     function HeaderChip(props) {
       const fullId = String((props && (props.sessionId || (props.standard && props.standard.sessionId))) || '')
       const shortId = fullId.slice(0, 20)
@@ -1425,7 +1365,7 @@ window.__ModuleLoader__.load({
 
       /** Run one jump, and never fail silently: an exception becomes a visible note. */
       const go = async (doc) => {
-        report('jump-start', { turn: doc.turn, mid: doc.mid || '', ...pageFacts() })
+        report('jump-start', { turn: doc.turn, mid: doc.mid || '', domTurns: turnRange(), bounds: turnBounds() })
         try {
           await jumpTo(doc)
         } catch (error) {
@@ -1602,10 +1542,6 @@ window.__ModuleLoader__.load({
           .fd-pop-foot { display:flex; gap:8px; align-items:center; padding:7px 10px; font-size:11.5px;
                          opacity:.6; border-top:1px solid color-mix(in srgb, currentColor 10%, transparent); }
           .fd-pop-hint { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-          .fd-pop-setup { flex:none; margin-left:auto; height:20px; padding:0 7px; border-radius:10px;
-                          cursor:pointer; font:inherit; font-size:10.5px; color:inherit;
-                          background:color-mix(in srgb, #FF8800 16%, transparent);
-                          border:1px solid color-mix(in srgb, #FF8800 40%, transparent); }
         `),
         h('button', {
           ref: chipRef, className: 'fd-chip', type: 'button',
@@ -1787,7 +1723,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.5.0')
+        console.info('[feishu-docs] client apply, version 3.5.1')
         beacon('apply')
 
         try {

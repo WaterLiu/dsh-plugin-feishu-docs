@@ -10,6 +10,8 @@
  *   node tools/make-index.mjs --npm      # registry source instead
  *
  * Writes `index.json` beside the repository root.
+ *
+ * @author WaterLiu
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'

@@ -9,6 +9,8 @@
  * A Session's log is `~/.dsh/sessions/<project>/session-<id>/session.v4.jsonl.zstd`.
  * Node 22.15+ can decompress zstd in core; older runtimes fall back to the `zstd`
  * binary when it happens to be installed.
+ *
+ * @author WaterLiu
  */
 import { mkdir, open, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -287,6 +289,9 @@ function queueSave() {
   }, 300)
 }
 
+/**
+ * Persist the per-Session scan state so a restart resumes instead of rescanning.
+ */
 async function saveIndex() {
   const out = {}
   for (const [key, entry] of scans) {

@@ -13,6 +13,8 @@
  * literals and regex literals are blanked (keeping line numbers), declared names are
  * collected from functions, variables, destructuring and parameters, and every
  * remaining `name(` that is not one of those is reported.
+ *
+ * @author WaterLiu
  */
 import { readFileSync } from 'node:fs'
 
@@ -78,6 +80,14 @@ function blank(text) {
       prev = '/'
       continue
     }
+    // A spread (`...name(`) must not look like a property access to the call
+    // regex below — blanking it keeps `pageFacts()` visible as a bare call.
+    if (ch === '.' && next === '.' && text[i + 2] === '.') {
+      out += '   '
+      i += 3
+      prev = '.'
+      continue
+    }
     if (ch === '"' || ch === "'" || ch === '`') {
       const quote = ch
       out += ' '
@@ -136,8 +146,10 @@ function collectDeclared(text) {
     }
   }
   for (const m of text.matchAll(/([A-Za-z_$][\w$]*)\s*=>/g)) declared.add(m[1])
-  // object/class member shorthand: `name(` right after `{`, `,` or a newline at member indent
-  for (const m of text.matchAll(/(?:^|[{,])\s*\n?\s*([A-Za-z_$][\w$]*)\s*\(/gm)) declared.add(m[1])
+  // Object/class member shorthand: `name(` at the start of a line. Deliberately
+  // strict — a looser rule treated `{ ..., missingFn() }` as a method definition and
+  // hid a genuinely undefined call.
+  for (const m of text.matchAll(/^\s*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/gm)) declared.add(m[1])
 
   return declared
 }

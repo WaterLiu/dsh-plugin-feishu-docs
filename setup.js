@@ -9,6 +9,8 @@
  *
  * Nothing here installs anything: a missing binary is reported with the exact
  * command that installs it, because a global install is the user's call.
+ *
+ * @author WaterLiu
  */
 import { execFile } from 'node:child_process'
 import zlib from 'node:zlib'

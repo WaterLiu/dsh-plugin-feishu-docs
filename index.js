@@ -16,6 +16,8 @@
  *   GET  /x-feishu-docs/auth/start?scopes=<csv>   begin a device-code login;
  *   GET  /x-feishu-docs/auth/finish?device=<code> complete it;
  *   GET  /x-feishu-docs/auth/logout               sign out.
+ *
+ * @author WaterLiu
  */
 import { appendFile, rename, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -57,6 +59,9 @@ async function trace(entry) {
 const KEEPALIVE_MS = 90 * 60 * 1000
 let keepAliveTimer = null
 
+/**
+ * Start the renewal timer, once.
+ */
 function keepAlive() {
   if (keepAliveTimer) return
   keepAliveTimer = setInterval(() => {
@@ -69,6 +74,11 @@ function keepAlive() {
   keepAliveTimer.unref?.()
 }
 
+/**
+ * The plugin entry: mount the routes the popover talks to.
+ *
+ * @param ctx - the host context; `webServer` is the injected service.
+ */
 export function apply(ctx) {
   ctx.effect(() =>
     ctx.webServer.register({

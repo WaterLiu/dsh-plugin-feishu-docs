@@ -9,6 +9,8 @@
  *   depended on the answer — a deletion check that can never fire, for instance.
  * - A GUI-launched host usually has no `~/.local/bin` on its `PATH`, so the
  *   binary is looked up through a plain shell first and the login shell second.
+ *
+ * @author WaterLiu
  */
 import { execFile } from 'node:child_process'
 
