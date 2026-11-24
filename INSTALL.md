@@ -83,7 +83,7 @@ tail -5 ~/.dsh/feishu-docs-log.ndjson
 
 点某行的 ⊙，会**直接滚到这份文档所在的那条消息**，并把消息里的**文档链接本身**高亮（琥珀色底 + 一圈描边，出现时脉冲两下）。
 
-高亮**只加在消息里的那个文档链接上**（一个 CSS 类）：不画覆盖层、不染整段文字、更不染整轮。它天然跟着内容滚动、不会盖住输入框。链接被 React 重渲染换掉时，会在保持期内每 250ms 重新贴上；如果链接当时不在视口里，会先把它滚进视口。定位方式是**用日志记录的"首次出现轮次" + 文档 token**：先按 `[data-chat-turn="N"]` 找到那一轮，再在轮内找含 token 的链接；如果那一轮还没挂载，就按需要往回翻历史直到它出现。
+高亮是**一个跟随链接矩形的独立小层**（不往 DSH 的节点上加类）：DSH 在流式输出时会重建行，加在上面的类会被冲掉，看起来就是闪烁；矩形每 120ms 重读一次，位置永远对得上，也不会闪。**只覆盖文档链接本身**，不染段落、不染整轮。链接被 React 重渲染换掉时，会在保持期内每 250ms 重新贴上；如果链接当时不在视口里，会先把它滚进视口。定位方式是**用日志记录的"首次出现轮次" + 文档 token**：先按 `[data-chat-turn="N"]` 找到那一轮，再在轮内找含 token 的链接；如果那一轮还没挂载，就按需要往回翻历史直到它出现。
 
 补充一个实现约束：DSH 的视图节点里同时有 `id`（消息唯一标识）和 `anchorSeq`（日志序号），但**渲染到 DOM 上只有 `data-chat-node-key`（路由用的 key）和 `data-chat-turn`**——消息 id 与序号都不在 DOM 里，DSH 自己的跳转接口（`jump = { turn, seq }`）也没有对外暴露。所以本插件不依赖 id 定位，而是靠记录的首次出现轮次 + 文档 token；需要时按轮次往回翻历史把它加载出来。
 
@@ -149,7 +149,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.0.3
+[feishu-docs] client apply, version 3.0.4
 [feishu-docs] header chip registered
 ```
 

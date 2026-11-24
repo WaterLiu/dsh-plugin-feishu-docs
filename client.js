@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.3', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.4', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.3', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.4', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -339,16 +339,16 @@ window.__ModuleLoader__.load({
       try {
         const style = document.createElement('style')
         style.textContent = `
-          .fd-doc-hit { background: color-mix(in srgb, #FFB020 38%, transparent) !important;
-                        border-radius: 4px; box-decoration-break: clone;
-                        box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 50%, transparent);
-                        transition: background .35s ease, box-shadow .35s ease; }
-          @keyframes fd-doc-hit-pulse {
-            from { box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 60%, transparent); }
+          .fd-doc-hl { position: fixed; z-index: 65; pointer-events: none; border-radius: 4px;
+                       background: color-mix(in srgb, #FFB020 38%, transparent);
+                       box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 52%, transparent);
+                       transition: opacity .35s ease; }
+          @keyframes fd-doc-hl-pulse {
+            from { box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 62%, transparent); }
             to { box-shadow: 0 0 0 8px transparent; }
           }
-          .fd-doc-hit[data-fresh] { animation: fd-doc-hit-pulse .8s ease-out 2; }
-          .fd-doc-hit[data-out] { background: transparent !important; box-shadow: 0 0 0 2px transparent; }
+          .fd-doc-hl[data-fresh] { animation: fd-doc-hl-pulse .8s ease-out 2; }
+          .fd-doc-hl[data-out] { opacity: 0; }
         `
         document.head.appendChild(style)
       } catch (error) {
@@ -383,18 +383,18 @@ window.__ModuleLoader__.load({
     }
 
     
-    /** The marked elements, and the timers that keep and retire the mark. */
-    let marked = []
+    /** The highlight layer, and the timers that place and retire it. */
+    let markNode = null
     let markTimer = null
     let markHold = null
     let markKey = null
 
-    /** How long the mark stays once it is on screen, and how long we hunt for it. */
+    /** How long it stays up, how long we look for the link, and the fade. */
     const MARK_HOLD = 3000
-    const MARK_LOOK = 4000
+    const MARK_LOOK = 5000
     const MARK_FADE = 380
 
-    /** Remove the mark and every timer/listener it installed. */
+    /** Remove the highlight and every timer/listener it installed. */
     function clearDocMark() {
       if (markTimer) {
         window.clearInterval(markTimer)
@@ -408,74 +408,50 @@ window.__ModuleLoader__.load({
         window.removeEventListener('keydown', markKey, true)
         markKey = null
       }
-      for (const el of marked) {
-        el.classList.remove('fd-doc-hit')
-        delete el.dataset.fresh
-        delete el.dataset.out
+      if (markNode) {
+        markNode.remove()
+        markNode = null
       }
-      // Anything a re-render duplicated keeps its class; sweep the document.
-      for (const el of document.querySelectorAll('.fd-doc-hit')) {
-        el.classList.remove('fd-doc-hit')
-        delete el.dataset.fresh
-        delete el.dataset.out
-      }
-      marked = []
     }
 
     /**
-     * Where a document lives on screen: the link, and the row it sits in.
+     * Put the layer over the document's link, or over the block when it has none.
      *
-     * `[data-chat-turn]` is on hundreds of elements — steps, tool rows, the turn
-     * itself — not just the message. Picking the first one gave a 27px step row, so
-     * scrolling moved a few hundred pixels and looked like nothing had happened.
-     * The block is therefore found by the token, and among those matches the link
-     * with a real rect wins, then the tallest row.
+     * The layer is its own element rather than a class on the app's node: DSH
+     * re-renders rows while a turn streams, which strips any class we add and made
+     * the highlight blink. A rect re-read every 120ms cannot blink — it is either
+     * over the link or it is gone.
      *
-     * @param doc - the document, with `turn` recorded at its first mention.
-     * @returns `{ anchor, row }` — either may be null.
+     * @returns whether there is something to cover right now.
      */
-    function docTarget(doc) {
-      const token = String((doc && doc.u) || '').split('/').pop()
-      if (!token) return { anchor: null, row: null }
-      const sized = (el) => {
-        const box = el.getBoundingClientRect()
-        return box.width > 4 && box.height > 4
+    function placeDocMark(doc) {
+      const { anchor, row } = docTarget(doc, true)
+      const el = anchor || row
+      if (!el) return false
+      const box = el.getBoundingClientRect()
+      if (box.width < 4 || box.height < 4) return false
+
+      if (!markNode) {
+        markNode = document.createElement('div')
+        markNode.className = 'fd-doc-hl'
+        markNode.dataset.fresh = ''
+        document.body.appendChild(markNode)
       }
-      const holds = (el) => {
-        const href = el.getAttribute('href') || ''
-        return href.includes(token) || (el.textContent || '').includes(token)
-      }
-
-      const turn = Number(doc && doc.turn)
-      const scoped = turn ? [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)] : []
-      const roots = scoped.length ? scoped : [...document.querySelectorAll('[data-chat-turn]')]
-
-      const anchor = roots
-        .flatMap((root) => [...root.querySelectorAll('a[href]')])
-        .find((el) => sized(el) && holds(el))
-      if (anchor) return { anchor, row: anchor.closest('[data-chat-turn]') }
-
-      const rows = roots.filter((root) => holds(root) && sized(root))
-      rows.sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)
-      if (rows.length) return { anchor: null, row: rows[0] }
-
-      // Last resort: an exact message row, when the token is not in the rendered text.
-      const exact = rowByMessageId(doc && doc.mid, doc && doc.seq)
-      return { anchor: null, row: exact }
+      markNode.style.top = `${Math.round(box.top - 2)}px`
+      markNode.style.left = `${Math.round(box.left - 2)}px`
+      markNode.style.width = `${Math.round(box.width + 4)}px`
+      markNode.style.height = `${Math.round(box.height + 4)}px`
+      return true
     }
 
-    /** Fade the mark out, then forget it. */
+    /** Fade the layer out, then remove it. */
     function fadeDocMark() {
-      for (const el of marked) el.dataset.out = ''
+      if (markNode) markNode.dataset.out = ''
       markHold = window.setTimeout(clearDocMark, MARK_FADE)
     }
 
     /**
-     * Highlight the document inside the message it first appears in.
-     *
-     * The mark is a class on the element itself, so it cannot drift away from the
-     * text: it moves with the message, survives scrolling, and needs no geometry.
-     * A re-render replaces the element, so the mark is re-applied while it is up.
+     * Highlight the document's link for three seconds.
      *
      * @param doc - the document the jump targeted.
      */
@@ -486,40 +462,28 @@ window.__ModuleLoader__.load({
       const token = String((doc && doc.u) || '').split('/').pop()
       const deadline = Date.now() + MARK_LOOK
       let reported = false
-      let holding = false
 
-      const paint = () => {
-        if (holding && marked.length && marked.every((el) => el.isConnected && el.classList.contains('fd-doc-hit'))) return
-        const { anchor } = docTarget(doc)
-        const el = anchor
-        if (!el) {
-          if (Date.now() > deadline) {
-            if (!reported) report('mark-miss', { token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
-            clearDocMark()
+      const tick = () => {
+        if (placeDocMark(doc)) {
+          if (!reported) {
+            reported = true
+            report('mark', { token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
           }
+          if (!markHold) markHold = window.setTimeout(fadeDocMark, MARK_HOLD)
           return
         }
-        if (!marked.includes(el)) marked.push(el)
-        // Marked but off-screen helps nobody: bring the element into view when the
-        // jump's own scroll did not manage it.
-        const box = el.getBoundingClientRect()
-        if (box.height > 4 && (box.bottom < 0 || box.top > window.innerHeight)) {
-          try { el.scrollIntoView({ block: 'center', behavior: 'auto' }) } catch (error) { /* ignore */ }
-        }
-        el.classList.add('fd-doc-hit')
-        if (!el.dataset.fresh) el.dataset.fresh = ''
-        if (!reported) {
-          reported = true
-          report('mark', { token, tag: el.tagName, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
-        }
-        if (!holding) {
-          holding = true
-          markHold = window.setTimeout(fadeDocMark, MARK_HOLD)
+        if (Date.now() > deadline) {
+          if (!reported) report('mark-miss', { token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
+          clearDocMark()
         }
       }
 
-      paint()
-      markTimer = window.setInterval(paint, 250)
+      tick()
+      // Keep following the link while it is up, and keep looking until it exists.
+      markTimer = window.setInterval(() => {
+        if (markHold) placeDocMark(doc)
+        else tick()
+      }, 120)
 
       const onKey = (event) => {
         if (event.key === 'Escape') clearDocMark()
@@ -529,17 +493,7 @@ window.__ModuleLoader__.load({
     }
 
 
-    /**
-     * Centre one visible row.
-     *
-     * The transcript follows its tail while the reader is at the bottom, and that
-     * follow logic overwrites `scrollTop` on the next frame. A synthetic wheel
-     * gesture hands ownership back to the reader first; the offset is then
-     * applied up to three times, reporting what the container actually did.
-     *
-     * @param row - the visible element to centre.
-     * @returns whether the container ended up moving.
-     */
+
     /**
      * Ask the transcript for more history by moving it to the top.
      *
@@ -769,7 +723,7 @@ window.__ModuleLoader__.load({
     async function ensureFirstMention(doc, onProgress) {
       // Ready means "the block that holds the document is rendered", not merely "a
       // row with that turn exists": turns carry steps and tool rows too.
-      const ready = docTarget(doc)
+      const ready = docTarget(doc, true)
       if (ready.anchor || ready.row) return ready
 
       // Loading means the transcript has to reach its top (this build's trigger), so
@@ -784,11 +738,11 @@ window.__ModuleLoader__.load({
         await loadOlderOnce()
         for (let wait = 0; wait < 8; wait += 1) {
           await sleep(120)
-          const probe = docTarget(doc)
+          const probe = docTarget(doc, true)
           if (probe.anchor || probe.row) break
           if (scroller && scroller.scrollHeight !== heightBefore) break
         }
-        const found = docTarget(doc)
+        const found = docTarget(doc, true)
         if (found.anchor || found.row) {
           report('jump-first-found', {
             attempt: attempt + 1, block: doc.block, anchor: Boolean(found.anchor),
@@ -803,7 +757,9 @@ window.__ModuleLoader__.load({
       if (scroller) {
         try { scroller.scrollTop = restore } catch (error) { /* ignore */ }
       }
-      const fallback = docTarget(doc)
+      // History could not be paged far enough: a later copy is better than nothing,
+      // but the caller is told so it can say "最近可加载的位置".
+      const fallback = docTarget(doc, false)
       report('jump-first-exhausted', {
         found: Boolean(fallback.anchor || fallback.row), block: doc && doc.block,
         turn: doc && doc.turn, mid: Boolean(doc && doc.mid), domTurns: turnRange(), keys: keySample(),
@@ -1604,7 +1560,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.0.3')
+        console.info('[feishu-docs] client apply, version 3.0.4')
         beacon('apply')
 
         try {
