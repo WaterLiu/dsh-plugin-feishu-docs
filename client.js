@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -555,6 +555,31 @@ window.__ModuleLoader__.load({
      * @param row - the visible element to centre.
      * @returns whether the container ended up moving.
      */
+    /**
+     * Ask the transcript for more history by moving it to the top.
+     *
+     * This build loads older messages when its own scroll reaches the top, and it
+     * exposes no other loader to a plugin: the history button is not always there
+     * and `conversation.loadOlder()` is not always reachable. So this stays, but the
+     * caller must put the view back — leaving it at the top is what looked like
+     * "the jump did nothing".
+     *
+     * @returns whether the transcript actually moved.
+     */
+    function nudgeTop() {
+      const scroller = transcript()
+      if (!scroller) return false
+      const before = scroller.scrollTop
+      try {
+        scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
+      } catch (error) {
+        /* no WheelEvent in this engine */
+      }
+      scroller.scrollTop = 0
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
+      return Math.abs(scroller.scrollTop - before) > 2
+    }
+
     /** The nearest scrollable ancestor of a row, else the transcript itself. */
     function scrollerFor(row) {
       let parent = row && row.parentElement
@@ -660,11 +685,11 @@ window.__ModuleLoader__.load({
       } catch (error) {
         failure = String(error)
       }
-      report('jump-loadolder', { settled, failure })
-      // No history control and no API: report failure instead of dragging the view
-      // somewhere else. Yanking the transcript to the top looked like "the jump did
-      // nothing" — worse than admitting history cannot be paged from here.
-      return settled
+      // Nothing answered: this build loads history by reaching its top, so push it
+      // there. The caller restores the view afterwards.
+      const nudged = settled ? false : nudgeTop()
+      report('jump-loadolder', { settled, failure, nudged })
+      return settled || nudged
     }
 
     /**
@@ -753,13 +778,23 @@ window.__ModuleLoader__.load({
       const ready = findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq)
       if (ready) return anchorInTurn() || ready
 
-      // Page older history until the recorded turn is mounted. Bounded tightly:
-      // a jump that cannot reach the first mention should still land somewhere
-      // within a second or two, not spin for ten.
-      for (let attempt = 0; attempt < 6; attempt += 1) {
+      // Page older history until the recorded turn is mounted. Loading means the
+      // transcript has to reach its top (this build's own trigger), so the original
+      // position is remembered and restored if the target never arrives.
+      const scroller = transcript()
+      const restore = scroller ? scroller.scrollTop : 0
+      const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+      for (let attempt = 0; attempt < 12; attempt += 1) {
         onProgress?.(attempt + 1)
-        const more = await loadOlderOnce()
-        await new Promise((resolve) => window.setTimeout(resolve, 200))
+        const heightBefore = scroller ? scroller.scrollHeight : 0
+        await loadOlderOnce()
+        // Wait for the target to mount, or for a page to actually arrive.
+        for (let wait = 0; wait < 8; wait += 1) {
+          await sleep(120)
+          if (findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq)) break
+          if (scroller && scroller.scrollHeight !== heightBefore) break
+        }
         const row = findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq)
         if (row) {
           report('jump-first-found', {
@@ -768,9 +803,15 @@ window.__ModuleLoader__.load({
           })
           return anchorInTurn() || row
         }
-        if (!more) break
+        // Two attempts without the transcript growing: nothing more is coming.
+        if (scroller && scroller.scrollHeight === heightBefore && attempt > 0) break
       }
 
+      // Could not reach it: put the reader back where they were, then fall back to
+      // whatever is loaded — never leave the transcript parked at the top.
+      if (scroller) {
+        try { scroller.scrollTop = restore } catch (error) { /* ignore */ }
+      }
       const fallback = findTurnRow(doc.turn) || docElement(doc)
       report('jump-first-exhausted', {
         found: Boolean(fallback), block: doc && doc.block, turn: doc && doc.turn,
