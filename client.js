@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.6', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.7', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.6', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.7', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -607,51 +607,55 @@ window.__ModuleLoader__.load({
      * @returns whether the page actually moved.
      */
     async function revealRow(row, doc) {
-      const tryScroll = async (scroller) => {
-        if (!scroller) return false
-        const before = scroller.scrollTop
-        const centre = () => {
-          const box = row.getBoundingClientRect()
-          const port = scroller.getBoundingClientRect()
-          scroller.scrollTop += box.top - port.top + box.height / 2 - port.height / 2
-          scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
-        }
+      const scroller = transcript() || scrollerFor(row)
+      if (!scroller) return false
 
-        const seen = []
-        for (let attempt = 1; attempt <= 3; attempt += 1) {
-          centre()
-          await new Promise((resolve) => window.setTimeout(resolve, 90))
-          seen.push(Math.round(scroller.scrollTop))
-          if (Math.abs(scroller.scrollTop - before) > 2) break
-          // Escalate: the browser's own scroll, then a hard assignment.
-          try { row.scrollIntoView({ block: 'center', behavior: 'auto' }) } catch (error) { /* ignore */ }
-          if (attempt === 2) {
-            const box = row.getBoundingClientRect()
-            const port = scroller.getBoundingClientRect()
-            const target = scroller.scrollTop + (box.top - port.top) - port.height / 3
-            scroller.scrollTop = Math.max(0, Math.min(target, scroller.scrollHeight - scroller.clientHeight))
-          }
-        }
+      const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
+      const frame = () => new Promise((resolve) => window.requestAnimationFrame(() => resolve()))
 
-        const moved = Math.abs(scroller.scrollTop - before) > 2
-        report('reveal', {
-          before: Math.round(before), after: Math.round(scroller.scrollTop), seen, moved,
-          rowHeight: Math.round(row.getBoundingClientRect().height),
-          isTranscript: scroller === transcript(),
-        })
-        return moved
+      // Take scroll ownership away from "follow the tail" first. Without this the
+      // app restores `scrollTop` on the next frame — the trace showed three
+      // identical samples and a jump that only moved on its third, hard attempt.
+      try {
+        scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
+      } catch (error) {
+        /* no WheelEvent in this engine */
+      }
+      await sleep(60)
+
+      const offset = () => {
+        const box = row.getBoundingClientRect()
+        const port = scroller.getBoundingClientRect()
+        return box.top - port.top + box.height / 2 - port.height / 2
       }
 
-      const primary = transcript()
-      const fallback = scrollerFor(row)
-      if (!primary && !fallback) return false
-      if (await tryScroll(primary)) return true
-      if (fallback && fallback !== primary && await tryScroll(fallback)) return true
+      const before = scroller.scrollTop
+      const seen = []
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const delta = offset()
+        if (Math.abs(delta) < 8) break
+        scroller.scrollTop += delta
+        await frame()
+        await sleep(50)
+        seen.push(Math.round(scroller.scrollTop))
+        if (Math.abs(offset()) < 24) break
+      }
 
-      // Neither scrolled: the row may simply already be in place, which is not a
-      // failure. Report it as settled so the caller does not claim otherwise.
-      const box = row.getBoundingClientRect()
-      return box.height > 4 && box.bottom > 0 && box.top < window.innerHeight
+      // Still off? Let the browser centre it, then confirm.
+      if (Math.abs(offset()) > 24) {
+        try { row.scrollIntoView({ block: 'center', behavior: 'instant' }) } catch (error) { /* ignore */ }
+        await frame()
+        await sleep(60)
+      }
+
+      const centred = Math.abs(offset()) < 24
+      const moved = Math.abs(scroller.scrollTop - before) > 2
+      report('reveal', {
+        before: Math.round(before), after: Math.round(scroller.scrollTop), seen,
+        centred, moved, rowHeight: Math.round(row.getBoundingClientRect().height),
+        isTranscript: scroller === transcript(),
+      })
+      return centred || moved
     }
 
     /** The transcript's own "load earlier" control, when history remains. */
@@ -1649,7 +1653,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.0.6')
+        console.info('[feishu-docs] client apply, version 3.0.7')
         beacon('apply')
 
         try {
