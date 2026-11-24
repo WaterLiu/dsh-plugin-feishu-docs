@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.3.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.3.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1481,8 +1481,6 @@ window.__ModuleLoader__.load({
                     background:var(--dsw-alias-bg-elevated, #fff);
                     border:1px solid color-mix(in srgb, currentColor 14%, transparent);
                     box-shadow:0 8px 28px color-mix(in srgb, #000 18%, transparent); }
-          .fd-pop-head { display:flex; align-items:center; gap:6px; padding:8px 10px; font-size:11.5px; opacity:.6;
-                         border-bottom:1px solid color-mix(in srgb, currentColor 10%, transparent); }
           .fd-pop-body { overflow:auto; min-height:0; }
           .fd-search { display:flex; align-items:center; gap:7px; margin:8px 10px 0; padding:0 9px;
                        height:30px; border-radius:8px;
@@ -1553,7 +1551,7 @@ window.__ModuleLoader__.load({
           .fd-user-auth .fd-auth-go:hover { background:#245CE0; border-color:#245CE0; }
           .fd-setup-link a { color:#3370FF; text-decoration:underline; word-break:break-all; }
           .fd-setup-err { font-size:11px; color:#B42318; }
-          .fd-user { display:flex; align-items:center; gap:8px; padding:9px 10px;
+          .fd-user { position:relative; display:flex; align-items:center; gap:8px; padding:9px 10px;
                      border-bottom:1px solid color-mix(in srgb, currentColor 10%, transparent); }
           .fd-user-avatar { flex:none; width:28px; height:28px; border-radius:50%; object-fit:cover; }
           .fd-user-initial { display:flex; align-items:center; justify-content:center;
@@ -1570,6 +1568,11 @@ window.__ModuleLoader__.load({
                           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
           .fd-user-sub { font-size:10.5px; opacity:.55; line-height:1.3;
                          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          .fd-user-count { position:absolute; left:50%; transform:translateX(-50%);
+                           display:flex; flex-direction:column; align-items:center; justify-content:center;
+                           gap:1px; pointer-events:none; }
+          .fd-user-count-label { font-size:9.5px; line-height:1.2; opacity:.5; white-space:nowrap; }
+          .fd-user-count-value { font-size:12.5px; line-height:1.25; font-weight:600; white-space:nowrap; }
           .fd-user-out { flex:none; height:22px; padding:0 9px; border-radius:11px; cursor:pointer;
                          font:inherit; font-size:11px; color:#B42318;
                          background:color-mix(in srgb, #F04438 10%, transparent);
@@ -1632,6 +1635,16 @@ window.__ModuleLoader__.load({
                       ? `${user.brand === 'lark' ? 'Lark' : '飞书'}个人用户`
                       : '点右侧「登录」授权飞书'),
                 ),
+                // The list's title and count live in the account row now: centred,
+                // stacked, instead of a separator line of their own. Hidden when the
+                // Session has none — the empty state explains that.
+                docs.length
+                  ? h('div', { className: 'fd-user-count' },
+                      h('div', { className: 'fd-user-count-label' }, '本会话云文档'),
+                      h('div', { className: 'fd-user-count-value' },
+                        shown.length === docs.length ? `${docs.length} 篇` : `${shown.length} / ${docs.length} 篇`),
+                    )
+                  : null,
                 user.available
                   ? h('button', {
                       className: logoutAsk ? 'fd-user-out fd-user-armed' : 'fd-user-out',
@@ -1732,13 +1745,6 @@ window.__ModuleLoader__.load({
                       : null,
                   )
                 : null,
-              docs.length
-                ? h('div', { className: 'fd-pop-head' },
-                    h('span', null, '本会话云文档'),
-                    h('span', { style: { marginLeft: 'auto' } },
-                      shown.length === docs.length ? `${docs.length} 篇` : `${shown.length} / ${docs.length} 篇`),
-                  )
-                : null,
               docs.length === 0
                 ? h(EmptyState, { state: data ? (data.error ? 'error' : 'empty') : 'loading' })
                 : null,
@@ -1780,7 +1786,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.3.0')
+        console.info('[feishu-docs] client apply, version 3.4.0')
         beacon('apply')
 
         try {
