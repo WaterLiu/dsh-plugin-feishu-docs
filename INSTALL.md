@@ -109,7 +109,7 @@ tail -5 ~/.dsh/feishu-docs-log.ndjson
 
 高亮**只落在可点击的链接上**：代码块、反引号里的同名 URL 是日志文本，不参与高亮；如果某个会话里这份文档只以代码形式出现过，那就只滚过去、不做标记（并在 `feishu-docs-log.ndjson` 里记一条 `mark-miss`）。这也和"只有正文里可点的链接才算文档"是一致的。
 
-跳转后**浮层不会自动关闭**，你可以连着点几条对比；只有点击浮层外部或按 Esc 才关。
+**跳转时会先关掉浮层**：浮层固定在右上角、宽度 400px，目标链接居中后很可能正好落在它下面，而且它自身是个可滚动容器，会干扰"谁在滚动"的判断。关掉之后再滚、再高亮，用的是设计时的原始布局。跳转成功后浮层保持关闭（高亮本身就是反馈）；只有"目标轮次仍未加载"这种失败情况才重新打开浮层并把原因显示出来。
 
 高亮出现后**停留 3 秒，然后淡出**（0.38 秒过渡）；按 **Esc** 立即收掉，跳到另一份文档会换成新的高亮。
 
@@ -163,7 +163,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.0.7
+[feishu-docs] client apply, version 3.0.8
 [feishu-docs] header chip registered
 ```
 

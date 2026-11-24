@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.7', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.8', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.7', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.8', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1314,19 +1314,27 @@ window.__ModuleLoader__.load({
       }
 
       const jumpTo = async (doc) => {
-        flash('正在定位到首次出现的位置…', 20000)
-        const target = await ensureFirstMention(doc, (n) => flash(`正在加载更早的消息…第 ${n} 次`, 20000))
+        // Close the panel first. While it is open it covers the top-right of the
+        // transcript — exactly where a centred link can land — and it is a scroll
+        // container of its own, which muddies who owns the scroll. Jumping with it
+        // closed is the layout the feature was designed against.
+        setOpen(false)
+        const target = await ensureFirstMention(doc, (n) => console.info(`[feishu-docs] loading older history… ${n}`))
         // The link is the thing to centre; the row is only a fallback for a block
         // whose link is not rendered.
         const focus = target.anchor || target.row
         if (!focus) {
+          // Nothing to jump to: reopen the panel so the reason is actually readable.
           copyText(`${doc.t || ''} · 第 ${doc.turn || '?'} 轮 · ${doc.hm || ''}`)
+          setOpen(true)
           flash(`第 ${doc.turn} 轮仍未加载（当前 ${turnRange() || '无'} 轮）· 已复制位置`, 3200)
           return
         }
         await revealRow(focus, doc)
         markDocument(doc)
-        flash(target.anchor ? `已定位到第 ${doc.turn} 轮的文档链接` : `已定位到第 ${doc.turn} 轮`, 2600)
+        // The panel is closed, so the highlight is the feedback; keep the trace for
+        // the record and leave the popover shut until the reader asks for it.
+        report('jump-done', { turn: doc.turn, anchor: Boolean(target.anchor), block: doc.block })
       }
 
       const toggle = () => {
@@ -1653,7 +1661,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.0.7')
+        console.info('[feishu-docs] client apply, version 3.0.8')
         beacon('apply')
 
         try {
