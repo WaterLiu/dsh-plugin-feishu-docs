@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.4', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.5', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.4', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.5', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -412,6 +412,53 @@ window.__ModuleLoader__.load({
         markNode.remove()
         markNode = null
       }
+    }
+
+    /**
+     * Where a document lives on screen: the link, and the row it sits in.
+     *
+     * `[data-chat-turn]` is on hundreds of elements — steps, tool rows, the turn
+     * itself — not only the message. Picking the first one gave a 27px step row, so
+     * scrolling moved a few hundred pixels and looked like nothing had happened.
+     * The block is therefore found by the token, and among those matches the link
+     * with a real rect wins, then the tallest row.
+     *
+     * @param doc - the document, with `turn` recorded at its first mention.
+     * @param strict - when true, only the recorded turn is searched. Paging relies
+     *   on this: a loose search would find a later copy of the document and report
+     *   success before the first mention had been loaded.
+     * @returns `{ anchor, row }` — either may be null.
+     */
+    function docTarget(doc, strict) {
+      const token = String((doc && doc.u) || '').split('/').pop()
+      if (!token) return { anchor: null, row: null }
+
+      const sized = (el) => {
+        const box = el.getBoundingClientRect()
+        return box.width > 4 && box.height > 4
+      }
+      const holds = (el) => {
+        const href = el.getAttribute('href') || ''
+        return href.includes(token) || (el.textContent || '').includes(token)
+      }
+
+      const turn = Number(doc && doc.turn)
+      const scoped = turn ? [...document.querySelectorAll(`[data-chat-turn="${turn}"]`)] : []
+      if (!scoped.length && strict) return { anchor: null, row: null }
+      const roots = scoped.length ? scoped : [...document.querySelectorAll('[data-chat-turn]')]
+
+      const anchor = roots
+        .flatMap((root) => [...root.querySelectorAll('a[href]')])
+        .find((el) => sized(el) && holds(el))
+      if (anchor) return { anchor, row: anchor.closest('[data-chat-turn]') }
+
+      const rows = roots.filter((root) => holds(root) && sized(root))
+      rows.sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)
+      if (rows.length) return { anchor: null, row: rows[0] }
+
+      // Nothing in the rendered text mentions it: fall back to the exact message row.
+      const exact = rowByMessageId(doc && doc.mid, doc && doc.seq)
+      return { anchor: null, row: exact }
     }
 
     /**
@@ -1560,7 +1607,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.0.4')
+        console.info('[feishu-docs] client apply, version 3.0.5')
         beacon('apply')
 
         try {

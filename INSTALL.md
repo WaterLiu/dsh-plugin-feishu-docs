@@ -67,6 +67,18 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 关键是**加载完必须回到目标**：找到目标就滚过去；12 次尝试仍未加载出来，就把滚动位置**恢复到进入前的样子**，再提示「已定位到最近可加载的位置」。这样既保住了加载能力，也不会把视图丢在顶部。
 
+## 改完先跑检查
+
+这个仓库带一个静态检查，专门抓"调用了不存在的函数"（`node --check` 只看语法，抓不到）：
+
+```bash
+node tools/check-undefined.mjs index.js scan.js owners.js setup.js cli.js avatar.js client.js
+# 或
+node --run check-undefined
+```
+
+它会剥掉注释、字符串、模板与正则字面量，收集函数/变量/解构/参数/import 的名字，再把所有"调用了但没声明"的名字报出来（带行号、退出码非 0）。已在两处历史回归上验证过（`nudgeTop is not defined`、`docTarget is not defined`）。
+
 ## 跳转没反应时怎么查
 
 跳转的每一步都会写一行追踪日志到 `~/.dsh/feishu-docs-log.ndjson`（超过 512 KiB 自动轮转成 `.1`）。真正排障时先看它：
@@ -149,7 +161,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.0.4
+[feishu-docs] client apply, version 3.0.5
 [feishu-docs] header chip registered
 ```
 
