@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.2', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.4.2', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1571,8 +1571,8 @@ window.__ModuleLoader__.load({
           .fd-user-count { position:absolute; left:50%; transform:translateX(-50%);
                            display:flex; flex-direction:column; align-items:center; justify-content:center;
                            gap:1px; pointer-events:none; }
-          .fd-user-count-label { font-size:9.5px; line-height:1.2; opacity:.5; white-space:nowrap; }
-          .fd-user-count-value { font-size:12.5px; line-height:1.25; font-weight:600; white-space:nowrap; }
+          .fd-user-count-label { font-size:12px; line-height:1.25; white-space:nowrap; }
+          .fd-user-count-value { font-size:10.5px; line-height:1.2; opacity:.5; white-space:nowrap; }
           .fd-user-out { flex:none; height:22px; padding:0 9px; border-radius:11px; cursor:pointer;
                          font:inherit; font-size:11px; color:#B42318;
                          background:color-mix(in srgb, #F04438 10%, transparent);
@@ -1640,10 +1640,10 @@ window.__ModuleLoader__.load({
                 // Session has none — the empty state explains that.
                 docs.length
                   ? h('div', { className: 'fd-user-count' },
-                      // Value first, label under it: a metric reads count-then-caption.
+                      // The title is the label; the count is its caption underneath.
+                      h('div', { className: 'fd-user-count-label' }, '本会话云文档'),
                       h('div', { className: 'fd-user-count-value' },
                         shown.length === docs.length ? `${docs.length} 篇` : `${shown.length} / ${docs.length} 篇`),
-                      h('div', { className: 'fd-user-count-label' }, '本会话云文档'),
                     )
                   : null,
                 user.available
@@ -1787,7 +1787,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.4.1')
+        console.info('[feishu-docs] client apply, version 3.4.2')
         beacon('apply')
 
         try {
