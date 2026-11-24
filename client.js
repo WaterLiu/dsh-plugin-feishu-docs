@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.8', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.9', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.8', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.9', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -388,6 +388,8 @@ window.__ModuleLoader__.load({
     let markTimer = null
     let markHold = null
     let markKey = null
+    let markFrame = 0
+    let markFollowers = []
 
     /** How long it stays up, how long we look for the link, and the fade. */
     const MARK_HOLD = 3000
@@ -408,6 +410,14 @@ window.__ModuleLoader__.load({
         window.removeEventListener('keydown', markKey, true)
         markKey = null
       }
+      if (markFrame) {
+        window.cancelAnimationFrame(markFrame)
+        markFrame = 0
+      }
+      for (const [event, handler] of markFollowers) {
+        window.removeEventListener(event, handler, true)
+      }
+      markFollowers = []
       if (markNode) {
         markNode.remove()
         markNode = null
@@ -526,11 +536,27 @@ window.__ModuleLoader__.load({
       }
 
       tick()
-      // Keep following the link while it is up, and keep looking until it exists.
+
+      // Follow the link on the frame it moves, not on a timer: a 120ms tick made the
+      // layer visibly trail the text while scrolling. Scroll and resize settle the
+      // position on the next animation frame; the interval below is only a safety
+      // net for layout changes that fire no event (images loading, a row expanding).
+      const schedule = () => {
+        if (markFrame) return
+        markFrame = window.requestAnimationFrame(() => {
+          markFrame = 0
+          if (markHold) placeDocMark(doc)
+          else tick()
+        })
+      }
+      for (const event of ['scroll', 'resize']) {
+        window.addEventListener(event, schedule, true)
+        markFollowers.push([event, schedule])
+      }
       markTimer = window.setInterval(() => {
         if (markHold) placeDocMark(doc)
         else tick()
-      }, 120)
+      }, 300)
 
       const onKey = (event) => {
         if (event.key === 'Escape') clearDocMark()
@@ -1661,7 +1687,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.0.8')
+        console.info('[feishu-docs] client apply, version 3.0.9')
         beacon('apply')
 
         try {
