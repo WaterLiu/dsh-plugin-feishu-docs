@@ -269,6 +269,7 @@ async function loadIndex() {
         scannedAt: value.scannedAt || 0,
         turn: value.turn || 0,
         docs: new Map((value.docs || []).map((doc) => [doc.k, doc])),
+        blocks: new Map(Object.entries(value.blocks || {}).map(([turn, block]) => [Number(turn), block])),
         created: new Set(value.created || []),
       })
     }
@@ -297,6 +298,7 @@ async function saveIndex() {
       scannedAt: entry.scannedAt,
       turn: entry.turn,
       docs: [...entry.docs.values()],
+      blocks: Object.fromEntries(entry.blocks),
       created: [...entry.created],
     }
   }
@@ -330,7 +332,25 @@ function applyLines(entry, chunk) {
     const data = record.data || {}
 
     if (record.type === 'turn/start') {
-      if (data.turn != null) entry.turn = data.turn
+      if (data.turn != null) {
+        entry.turn = data.turn
+        // A turn is one question-and-answer block: `turn/start` … `turn/end`.
+        // Recording both seqs gives each block a stable identity that the log and
+        // the rendered rows share (`data-chat-turn`).
+        entry.blocks.set(entry.turn, { start: record.seq, end: null })
+      }
+      continue
+    }
+
+    if (record.type === 'turn/end') {
+      const turn = data.turn ?? entry.turn
+      const block = entry.blocks.get(turn)
+      if (block) block.end = record.seq
+      else entry.blocks.set(turn, { start: null, end: record.seq })
+      // Documents first seen in this turn become complete with it.
+      for (const doc of entry.docs.values()) {
+        if (doc.turn === turn) doc.endSeq = record.seq
+      }
       continue
     }
 
@@ -357,10 +377,15 @@ function applyLines(entry, chunk) {
         if (!seen.t && hit.title) seen.t = hit.title
         continue
       }
+      const block = entry.blocks.get(atTurn) || null
       entry.docs.set(key, {
         k: key,
         mid: messageId,
         seq: messageSeq,
+        // The block this document belongs to: one turn, start..end.
+        block: `${entry.id}#${atTurn || 0}`,
+        startSeq: block ? block.start : null,
+        endSeq: block ? block.end : null,
         t: hit.title,
         ty: KIND[hit.kind] || hit.kind,
         // Keep the URL the message used: tenants differ, so it must not be rebuilt.
@@ -422,7 +447,7 @@ export async function readSession(sessionId) {
   const key = `${found.project}/${found.id}`
   let entry = scans.get(key)
   if (!entry) {
-    entry = { id: found.id, project: found.project, offset: 0, rev: '', scannedAt: 0, turn: 0, docs: new Map(), created: new Set() }
+    entry = { id: found.id, project: found.project, offset: 0, rev: '', scannedAt: 0, turn: 0, docs: new Map(), blocks: new Map(), created: new Set() }
     scans.set(key, entry)
   }
 

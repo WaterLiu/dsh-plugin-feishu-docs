@@ -38,6 +38,21 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 退出只清除本机的飞书登录态，不动你的文档。退出后浮层会立刻变成「未登录飞书」，并出现「去授权」，重新授权一次即可恢复创建者、真实标题和删除标记。
 
+## 文档是怎么和对话对上的：turn 块
+
+会话日志里的 `turn/start` 与 `turn/end` 成对出现，中间的 `user/message`、`assistant/message`、`step` 都属于这一次问答。插件用它给每份文档锁定"来源范围"：
+
+| 字段 | 含义 |
+|---|---|
+| `turn` | 首次出现的那一轮（与渲染行的 `data-chat-turn` 同一套编号） |
+| `block` | `会话id#turn`，反查用的唯一标识 |
+| `startSeq` / `endSeq` | 该块在日志里的序号范围（`turn/start` → `turn/end`），块未结束时 `endSeq` 为空 |
+| `mid` / `seq` | 首次出现那条消息的 id 与序号（上游若肯在 DOM 输出 id，可直接精确命中） |
+
+查找顺序因此变成：**先按 `block` 对应的轮次找行 → 轮内按 token 找链接 → 再退到消息 id / 整段扫描**。同一份文档重复出现时，`turn`/`block` 只在**第一次**写入，所以"最早"是数据本身决定的，不靠搜索顺序。
+
+如果跳转落点不对，追踪日志里的 `domTurns` 会给出当前渲染的轮次范围，可直接判断"日志的 turn 编号"和"DOM 的 turn 编号"是否同一套。
+
 ## 更快的跳转取决于 DSH 的一个属性
 
 聊天行目前只带 `data-chat-node-key` 和 `data-chat-turn`，没有消息 id；而它背后的视图节点其实有 `id` 和 `anchorSeq`。要让跳转"一次到位、不用翻历史"，需要 DSH 在行上多输出两个属性——具体位置、改动内容和风险见 [`contrib/upstream-data-chat-node-id.md`](contrib/upstream-data-chat-node-id.md)。
@@ -130,7 +145,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 2.9.1
+[feishu-docs] client apply, version 3.0.0
 [feishu-docs] header chip registered
 ```
 

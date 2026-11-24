@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.9.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '2.9.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -688,6 +688,15 @@ window.__ModuleLoader__.load({
       return last
     }
 
+    /** Which turn numbers are actually rendered right now, as a range. */
+    function turnRange() {
+      const turns = [...document.querySelectorAll('[data-chat-turn]')]
+        .map((el) => Number(el.getAttribute('data-chat-turn')))
+        .filter((n) => Number.isFinite(n))
+      if (!turns.length) return ''
+      return `${Math.min(...turns)}-${Math.max(...turns)}`
+    }
+
     /** A few rendered row keys, for the trace: does a key carry the message id? */
     function keySample() {
       try {
@@ -739,8 +748,9 @@ window.__ModuleLoader__.load({
         return null
       }
 
-      // Already loaded: the row key may name it, otherwise the turn does.
-      const ready = rowByMessageId(doc.mid, doc.seq) || findTurnRow(doc.turn)
+      // Already loaded: the block (one turn) is the shared key between the log and
+      // the rows, so prefer it; the message id only helps on builds that render it.
+      const ready = findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq)
       if (ready) return anchorInTurn() || ready
 
       // Page older history until the recorded turn is mounted. Bounded tightly:
@@ -750,16 +760,22 @@ window.__ModuleLoader__.load({
         onProgress?.(attempt + 1)
         const more = await loadOlderOnce()
         await new Promise((resolve) => window.setTimeout(resolve, 200))
-        const row = rowByMessageId(doc.mid, doc.seq) || findTurnRow(doc.turn)
+        const row = findTurnRow(doc.turn) || rowByMessageId(doc.mid, doc.seq)
         if (row) {
-          report('jump-first-found', { attempt: attempt + 1, mid: Boolean(doc.mid), viaTurn: Boolean(findTurnRow(doc.turn)) })
+          report('jump-first-found', {
+            attempt: attempt + 1, block: doc.block, viaTurn: Boolean(findTurnRow(doc.turn)),
+            mid: Boolean(doc.mid), domTurns: turnRange(),
+          })
           return anchorInTurn() || row
         }
         if (!more) break
       }
 
       const fallback = findTurnRow(doc.turn) || docElement(doc)
-      report('jump-first-exhausted', { found: Boolean(fallback), mid: Boolean(doc && doc.mid), keys: keySample() })
+      report('jump-first-exhausted', {
+        found: Boolean(fallback), block: doc && doc.block, turn: doc && doc.turn,
+        mid: Boolean(doc && doc.mid), domTurns: turnRange(), keys: keySample(),
+      })
       return fallback
     }
 
