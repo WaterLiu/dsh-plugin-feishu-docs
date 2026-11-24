@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.1.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.2.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.1.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.2.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -400,13 +400,10 @@ window.__ModuleLoader__.load({
     /** The highlight layer, and the timers that place and retire it. */
     let markNode = null
     let markTimer = null
-    let markHold = null
-    let markKey = null
     let markFrame = 0
     let markFollowers = []
 
-    /** How long it stays up, how long we look for the link, and the fade. */
-    const MARK_HOLD = 3000
+    /** How long we look for the link, and the overlay's fade. */
     const MARK_LOOK = 5000
     const MARK_FADE = 380
 
@@ -416,20 +413,12 @@ window.__ModuleLoader__.load({
         window.clearInterval(markTimer)
         markTimer = null
       }
-      if (markHold) {
-        window.clearTimeout(markHold)
-        markHold = null
-      }
-      if (markKey) {
-        window.removeEventListener('keydown', markKey, true)
-        markKey = null
-      }
       if (markFrame) {
         window.cancelAnimationFrame(markFrame)
         markFrame = 0
       }
-      for (const [event, handler] of markFollowers) {
-        window.removeEventListener(event, handler, true)
+      for (const [event, handler, options] of markFollowers) {
+        window.removeEventListener(event, handler, options || true)
       }
       markFollowers = []
       if (canUseHighlights) {
@@ -464,9 +453,15 @@ window.__ModuleLoader__.load({
         const box = el.getBoundingClientRect()
         return box.width > 4 && box.height > 4
       }
+      // A document can be rendered as its URL *or* as a label (`[名称](url)`), and in
+      // the label case the token is nowhere in the text — the recorded title is.
+      const title = String((doc && doc.t) || '').trim()
+      const usableTitle = title && !/^[A-Za-z0-9_-]{16,}$/.test(title)
       const holds = (el) => {
         const href = el.getAttribute('href') || ''
-        return href.includes(token) || (el.textContent || '').includes(token)
+        if (href.includes(token)) return true
+        const text = el.textContent || ''
+        return text.includes(token) || Boolean(usableTitle && text.includes(title))
       }
 
       const turn = Number(doc && doc.turn)
@@ -518,38 +513,60 @@ window.__ModuleLoader__.load({
       return true
     }
 
-    /** Fade the layer out (overlay path) or drop the browser highlight at once. */
-    function fadeDocMark() {
-      if (canUseHighlights) {
-        clearDocMark()
-        return
-      }
-      if (markNode) markNode.dataset.out = ''
-      markHold = window.setTimeout(clearDocMark, MARK_FADE)
+    /**
+     * Dismiss the mark. There is no timer: the mark stays until the reader does
+     * something else, which is the only signal that it is no longer needed.
+     */
+    function dismissOnInteraction() {
+      clearDocMark()
     }
 
-    /** A Range over the document's own text, or null when it is not rendered. */
+    /**
+     * A Range over the document as the reader sees it.
+     *
+     * When the message rendered a link, the *whole* link is highlighted — the URL in
+     * full, or the label when the message wrote `[名称](url)`. Without a link, the
+     * first text node holding the token or the recorded title is used instead.
+     *
+     * @param doc - the document the jump targeted.
+     * @returns a Range, or null when the document is not rendered.
+     */
     function tokenRange(doc) {
       const token = String((doc && doc.u) || '').split('/').pop()
-      if (!token) return null
+      const title = String((doc && doc.t) || '').trim()
+      const usableTitle = title && !/^[A-Za-z0-9_-]{16,}$/.test(title)
       const { anchor } = docTarget(doc, true)
+
+      if (anchor && (anchor.textContent || '').trim()) {
+        const whole = document.createRange()
+        try {
+          whole.selectNodeContents(anchor)
+          return whole
+        } catch (error) {
+          /* fall through to the text search */
+        }
+      }
+
+      const needles = [token, usableTitle ? title : ''].filter(Boolean)
       const root = anchor || transcript()
-      if (!root) return null
+      if (!root || !needles.length) return null
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const text = node.nodeValue || ''
-        const at = text.indexOf(token)
-        if (at < 0) continue
         const host = node.parentElement
         if (!host || host.closest('pre, code')) continue
-        const range = document.createRange()
-        try {
-          range.setStart(node, at)
-          range.setEnd(node, at + token.length)
-        } catch (error) {
-          continue
+        for (const needle of needles) {
+          const at = text.indexOf(needle)
+          if (at < 0) continue
+          const range = document.createRange()
+          try {
+            range.setStart(node, at)
+            range.setEnd(node, at + needle.length)
+          } catch (error) {
+            continue
+          }
+          return range
         }
-        return range
       }
       return null
     }
@@ -568,7 +585,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Highlight the document's link for three seconds.
+     * Highlight the document's link, and keep it until the reader acts.
      *
      * With the Custom Highlight API this is a Range over the existing text: no
      * overlay, no rect maths, and it follows scrolling by construction. The overlay
@@ -593,7 +610,6 @@ window.__ModuleLoader__.load({
               via: canUseHighlights ? 'css-highlight' : 'overlay',
             })
           }
-          if (!markHold) markHold = window.setTimeout(fadeDocMark, MARK_HOLD)
           return
         }
         if (Date.now() > deadline) {
@@ -607,11 +623,17 @@ window.__ModuleLoader__.load({
       // the Range. Cheap — nothing is measured.
       markTimer = window.setInterval(tick, canUseHighlights ? 400 : 300)
 
-      const onKey = (event) => {
-        if (event.key === 'Escape') clearDocMark()
-      }
-      markKey = onKey
-      window.addEventListener('keydown', onKey, true)
+      // Any deliberate interaction retires it — a press, a key, a wheel, a touch.
+      // Scrolling alone does not: reading means scrolling.
+      const options = { capture: true, passive: true }
+      const listeners = [
+        ['pointerdown', dismissOnInteraction, options],
+        ['keydown', dismissOnInteraction, options],
+        ['wheel', dismissOnInteraction, options],
+        ['touchstart', dismissOnInteraction, options],
+      ]
+      for (const [event, handler, opts] of listeners) window.addEventListener(event, handler, opts)
+      markFollowers = listeners
     }
 
 
@@ -1736,7 +1758,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.1.0')
+        console.info('[feishu-docs] client apply, version 3.2.0')
         beacon('apply')
 
         try {
