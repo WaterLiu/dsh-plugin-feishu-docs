@@ -34,6 +34,7 @@ const GLOBALS = new Set([
   'TextDecoder', 'NodeFilter', 'Range', 'WheelEvent', 'Event', 'MutationObserver',
   'ResizeObserver', 'IntersectionObserver', 'getComputedStyle', 'Buffer', 'process', 'require',
   'module', 'exports', 'globalThis', 'Intl', 'AggregateError', 'FinalizationRegistry',
+  'CSS', 'Highlight', 'CustomEvent', 'DOMParser', 'Notification', 'performance', 'crypto',
 ])
 
 /** Characters that may precede a `/` that starts a regex literal. */

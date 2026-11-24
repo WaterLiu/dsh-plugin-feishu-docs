@@ -97,7 +97,9 @@ tail -5 ~/.dsh/feishu-docs-log.ndjson
 
 点某行的 ⊙，会**直接滚到这份文档所在的那条消息**，并把消息里的**文档链接本身**高亮（琥珀色底 + 一圈描边，出现时脉冲两下）。
 
-高亮是**一个跟随链接矩形的独立小层**（不往 DSH 的节点上加类）：DSH 在流式输出时会重建行，加在上面的类会被冲掉，看起来就是闪烁。位置**跟随 scroll / resize 事件在下一帧对齐**（之前是 120ms 定时器，滚动时能看出滞后）；另有 300ms 兜底定时器，处理「没有事件但布局变了」的情况（图片加载、行展开）。**只覆盖文档链接本身**，不染段落、不染整轮。链接被 React 重渲染换掉时，会在保持期内每 250ms 重新贴上；如果链接当时不在视口里，会先把它滚进视口。定位方式是**用日志记录的"首次出现轮次" + 文档 token**：先按 `[data-chat-turn="N"]` 找到那一轮，再在轮内找含 token 的链接；如果那一轮还没挂载，就按需要往回翻历史直到它出现。
+高亮**不是覆盖层，也不用算坐标**：用浏览器的 **CSS Custom Highlight API**（`CSS.highlights` + `::highlight()`）给文档链接的**那段文本本身**上色——Range 指向的就是文字，所以滚动时它天然跟着走，不存在滞后或错位，也不往 DSH 的 DOM 里插任何东西。
+
+老引擎没有 `CSS.highlights` 时会退回"跟随矩形的小层"实现（同样的琥珀色、3 秒后淡出），行为一致，只是那种方式需要每帧重算位置。**只覆盖文档链接本身**，不染段落、不染整轮。链接被 React 重渲染换掉时，会在保持期内每 250ms 重新贴上；如果链接当时不在视口里，会先把它滚进视口。定位方式是**用日志记录的"首次出现轮次" + 文档 token**：先按 `[data-chat-turn="N"]` 找到那一轮，再在轮内找含 token 的链接；如果那一轮还没挂载，就按需要往回翻历史直到它出现。
 
 补充一个实现约束：DSH 的视图节点里同时有 `id`（消息唯一标识）和 `anchorSeq`（日志序号），但**渲染到 DOM 上只有 `data-chat-node-key`（路由用的 key）和 `data-chat-turn`**——消息 id 与序号都不在 DOM 里，DSH 自己的跳转接口（`jump = { turn, seq }`）也没有对外暴露。所以本插件不依赖 id 定位，而是靠记录的首次出现轮次 + 文档 token；需要时按轮次往回翻历史把它加载出来。
 
@@ -163,7 +165,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.0.9
+[feishu-docs] client apply, version 3.1.0
 [feishu-docs] header chip registered
 ```
 

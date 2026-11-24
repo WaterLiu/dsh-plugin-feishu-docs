@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.9', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.1.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.0.9', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.1.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -331,6 +331,16 @@ window.__ModuleLoader__.load({
      * @param row - the element to centre.
      * @returns whether the viewport actually moved.
      */
+    /**
+     * Highlight the document's own text with the CSS Custom Highlight API.
+     *
+     * `CSS.highlights` lets the browser paint a Range with a `::highlight()` style:
+     * no overlay, no rect maths, nothing inserted into DSH's DOM — and it moves with
+     * the text because it *is* the text. Older engines fall back to the overlay.
+     */
+    const HIGHLIGHT_NAME = 'feishu-doc-hit'
+    const canUseHighlights = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function'
+
     /** One injected stylesheet for the document mark. */
     let markStyles = false
     function ensureMarkStyles() {
@@ -339,6 +349,10 @@ window.__ModuleLoader__.load({
       try {
         const style = document.createElement('style')
         style.textContent = `
+          ::highlight(${HIGHLIGHT_NAME}) {
+            background-color: rgba(255, 176, 32, 0.42);
+            color: inherit;
+          }
           .fd-doc-hl { position: fixed; z-index: 65; pointer-events: none; border-radius: 4px;
                        background: color-mix(in srgb, #FFB020 38%, transparent);
                        box-shadow: 0 0 0 2px color-mix(in srgb, #FFB020 52%, transparent);
@@ -418,6 +432,9 @@ window.__ModuleLoader__.load({
         window.removeEventListener(event, handler, true)
       }
       markFollowers = []
+      if (canUseHighlights) {
+        try { CSS.highlights.delete(HIGHLIGHT_NAME) } catch (error) { /* ignore */ }
+      }
       if (markNode) {
         markNode.remove()
         markNode = null
@@ -501,14 +518,61 @@ window.__ModuleLoader__.load({
       return true
     }
 
-    /** Fade the layer out, then remove it. */
+    /** Fade the layer out (overlay path) or drop the browser highlight at once. */
     function fadeDocMark() {
+      if (canUseHighlights) {
+        clearDocMark()
+        return
+      }
       if (markNode) markNode.dataset.out = ''
       markHold = window.setTimeout(clearDocMark, MARK_FADE)
     }
 
+    /** A Range over the document's own text, or null when it is not rendered. */
+    function tokenRange(doc) {
+      const token = String((doc && doc.u) || '').split('/').pop()
+      if (!token) return null
+      const { anchor } = docTarget(doc, true)
+      const root = anchor || transcript()
+      if (!root) return null
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.nodeValue || ''
+        const at = text.indexOf(token)
+        if (at < 0) continue
+        const host = node.parentElement
+        if (!host || host.closest('pre, code')) continue
+        const range = document.createRange()
+        try {
+          range.setStart(node, at)
+          range.setEnd(node, at + token.length)
+        } catch (error) {
+          continue
+        }
+        return range
+      }
+      return null
+    }
+
+    /** Paint the mark, whichever way this engine supports. */
+    function paintDocMark(doc) {
+      if (!canUseHighlights) return placeDocMark(doc)
+      const range = tokenRange(doc)
+      if (!range) return false
+      try {
+        CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(range))
+      } catch (error) {
+        return false
+      }
+      return true
+    }
+
     /**
      * Highlight the document's link for three seconds.
+     *
+     * With the Custom Highlight API this is a Range over the existing text: no
+     * overlay, no rect maths, and it follows scrolling by construction. The overlay
+     * remains only for engines without `CSS.highlights`.
      *
      * @param doc - the document the jump targeted.
      */
@@ -521,10 +585,13 @@ window.__ModuleLoader__.load({
       let reported = false
 
       const tick = () => {
-        if (placeDocMark(doc)) {
+        if (paintDocMark(doc)) {
           if (!reported) {
             reported = true
-            report('mark', { token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid) })
+            report('mark', {
+              token, turn: doc && doc.turn, mid: Boolean(doc && doc.mid),
+              via: canUseHighlights ? 'css-highlight' : 'overlay',
+            })
           }
           if (!markHold) markHold = window.setTimeout(fadeDocMark, MARK_HOLD)
           return
@@ -536,27 +603,9 @@ window.__ModuleLoader__.load({
       }
 
       tick()
-
-      // Follow the link on the frame it moves, not on a timer: a 120ms tick made the
-      // layer visibly trail the text while scrolling. Scroll and resize settle the
-      // position on the next animation frame; the interval below is only a safety
-      // net for layout changes that fire no event (images loading, a row expanding).
-      const schedule = () => {
-        if (markFrame) return
-        markFrame = window.requestAnimationFrame(() => {
-          markFrame = 0
-          if (markHold) placeDocMark(doc)
-          else tick()
-        })
-      }
-      for (const event of ['scroll', 'resize']) {
-        window.addEventListener(event, schedule, true)
-        markFollowers.push([event, schedule])
-      }
-      markTimer = window.setInterval(() => {
-        if (markHold) placeDocMark(doc)
-        else tick()
-      }, 300)
+      // Re-register while it is up: a re-render replaces the text node, which breaks
+      // the Range. Cheap — nothing is measured.
+      markTimer = window.setInterval(tick, canUseHighlights ? 400 : 300)
 
       const onKey = (event) => {
         if (event.key === 'Escape') clearDocMark()
@@ -1687,7 +1736,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.0.9')
+        console.info('[feishu-docs] client apply, version 3.1.0')
         beacon('apply')
 
         try {
