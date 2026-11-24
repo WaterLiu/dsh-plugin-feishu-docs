@@ -25,7 +25,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.2.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.3.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -34,7 +34,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.2.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.3.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -720,10 +720,28 @@ window.__ModuleLoader__.load({
       }
       await sleep(60)
 
+      /**
+       * Where the middle of the free area is.
+       *
+       * The popover can stay open while jumping now, and it floats over the top of
+       * the transcript; centring on the viewport would park the link underneath it.
+       * When there is room below the panel, that band's middle is the target;
+       * otherwise the viewport middle is the best available answer.
+       */
+      const desiredCentre = () => {
+        const port = scroller.getBoundingClientRect()
+        const middle = port.top + port.height / 2
+        const pop = document.querySelector('.fd-pop')
+        const box = pop ? pop.getBoundingClientRect() : null
+        if (!box || box.height < 40) return middle
+        const band = { top: box.bottom, bottom: port.bottom }
+        if (band.bottom - band.top < 200) return middle
+        return band.top + (band.bottom - band.top) / 2
+      }
+
       const offset = () => {
         const box = row.getBoundingClientRect()
-        const port = scroller.getBoundingClientRect()
-        return box.top - port.top + box.height / 2 - port.height / 2
+        return box.top + box.height / 2 - desiredCentre()
       }
 
       const before = scroller.scrollTop
@@ -738,21 +756,28 @@ window.__ModuleLoader__.load({
         if (Math.abs(offset()) < 24) break
       }
 
-      // Still off? Let the browser centre it, then confirm.
+      // Still off? Ask the browser to centre it, then confirm.
       if (Math.abs(offset()) > 24) {
         try { row.scrollIntoView({ block: 'center', behavior: 'instant' }) } catch (error) { /* ignore */ }
         await frame()
         await sleep(60)
       }
 
+      const box = row.getBoundingClientRect()
+      const port = scroller.getBoundingClientRect()
+      const inside = box.bottom > port.top + 8 && box.top < port.bottom - 8
+      const pop = document.querySelector('.fd-pop')
+      const popBox = pop ? pop.getBoundingClientRect() : null
+      const covered = Boolean(popBox) && box.top < popBox.bottom && box.right > popBox.left
       const centred = Math.abs(offset()) < 24
       const moved = Math.abs(scroller.scrollTop - before) > 2
       report('reveal', {
         before: Math.round(before), after: Math.round(scroller.scrollTop), seen,
-        centred, moved, rowHeight: Math.round(row.getBoundingClientRect().height),
+        centred, covered, inside, moved,
+        rowHeight: Math.round(box.height),
         isTranscript: scroller === transcript(),
       })
-      return centred || moved
+      return inside && !covered
     }
 
     /** The transcript's own "load earlier" control, when history remains. */
@@ -1411,27 +1436,24 @@ window.__ModuleLoader__.load({
       }
 
       const jumpTo = async (doc) => {
-        // Close the panel first. While it is open it covers the top-right of the
-        // transcript — exactly where a centred link can land — and it is a scroll
-        // container of its own, which muddies who owns the scroll. Jumping with it
-        // closed is the layout the feature was designed against.
-        setOpen(false)
-        const target = await ensureFirstMention(doc, (n) => console.info(`[feishu-docs] loading older history… ${n}`))
+        // The panel stays open: `revealRow` aims at the middle of the free band below
+        // it, so the link is never parked underneath. Closing it (as an earlier
+        // version did) made jumping a two-step affair — close, then reopen to pick
+        // the next document.
+        const target = await ensureFirstMention(doc, (n) => flash(`正在加载更早的消息…第 ${n} 次`, 20000))
         // The link is the thing to centre; the row is only a fallback for a block
         // whose link is not rendered.
         const focus = target.anchor || target.row
         if (!focus) {
           // Nothing to jump to: reopen the panel so the reason is actually readable.
           copyText(`${doc.t || ''} · 第 ${doc.turn || '?'} 轮 · ${doc.hm || ''}`)
-          setOpen(true)
           flash(`第 ${doc.turn} 轮仍未加载（当前 ${turnRange() || '无'} 轮）· 已复制位置`, 3200)
           return
         }
-        await revealRow(focus, doc)
+        const settled = await revealRow(focus, doc)
         markDocument(doc)
-        // The panel is closed, so the highlight is the feedback; keep the trace for
-        // the record and leave the popover shut until the reader asks for it.
-        report('jump-done', { turn: doc.turn, anchor: Boolean(target.anchor), block: doc.block })
+        report('jump-done', { turn: doc.turn, anchor: Boolean(target.anchor), block: doc.block, settled })
+        flash(target.anchor ? `已定位到第 ${doc.turn} 轮的文档链接` : `已定位到第 ${doc.turn} 轮`, 2600)
       }
 
       const toggle = () => {
@@ -1758,7 +1780,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.2.0')
+        console.info('[feishu-docs] client apply, version 3.3.0')
         beacon('apply')
 
         try {
