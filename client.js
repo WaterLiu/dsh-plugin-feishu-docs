@@ -27,7 +27,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.2', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -36,7 +36,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.2', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1319,13 +1319,26 @@ window.__ModuleLoader__.load({
       // Who appears in this Session's list, for the 来自用户 filter.
       const creators = useMemo(() => [...new Set(docs.map((d) => d.by).filter(Boolean))].sort(), [docs])
       const needle = query.trim().toLowerCase()
-      const shown = useMemo(() => docs.filter((d) => {
-        if (creator && d.by !== creator) return false
-        if (!needle) return true
-        // Title and the token in its URL: a row still showing a bare token is
-        // findable that way. The creator is not searched — 来自用户 filters by it.
-        return [d.t, d.u].some((field) => String(field || '').toLowerCase().includes(needle))
-      }), [docs, creator, needle])
+      const shown = useMemo(() => docs
+        .filter((d) => {
+          if (creator && d.by !== creator) return false
+          if (!needle) return true
+          // Title and the token in its URL: a row still showing a bare token is
+          // findable that way. The creator is not searched — 来自用户 filters by it.
+          return [d.t, d.u].some((field) => String(field || '').toLowerCase().includes(needle))
+        })
+        // Newest first, both across days and inside one: the day header is drawn when
+        // this ordering changes day, so the grouping follows the sort.
+        .slice()
+        .sort((a, b) => {
+          const dayA = String(a.d || '')
+          const dayB = String(b.d || '')
+          if (dayA !== dayB) return dayA < dayB ? 1 : -1
+          const turnA = Number(a.turn) || 0
+          const turnB = Number(b.turn) || 0
+          if (turnA !== turnB) return turnB - turnA
+          return String(b.u || '').localeCompare(String(a.u || ''))
+        }), [docs, creator, needle])
       // A new account means the previous failure no longer applies.
       useEffect(() => { setAvatarBroken(false) }, [user.avatarAt])
       /**
@@ -1754,7 +1767,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.8.1')
+        console.info('[feishu-docs] client apply, version 3.8.2')
         beacon('apply')
 
         try {

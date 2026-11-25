@@ -267,7 +267,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.8.1
+[feishu-docs] client apply, version 3.8.2
 [feishu-docs] header chip registered
 ```
 
