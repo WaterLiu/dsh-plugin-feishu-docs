@@ -22,7 +22,8 @@ import { dirname, join } from 'node:path'
 
 import { invoke, invokeData, larkCli, why } from './cli.js'
 
-const CACHE = join(homedir(), '.dsh', 'feishu-docs-owners.json')
+const STATE = process.env.FEISHU_DOCS_STATE_DIR || join(homedir(), '.dsh')
+const CACHE = join(STATE, 'feishu-docs-owners.json')
 
 /** How long one document's answer is trusted before Feishu is asked again. */
 const TTL = 6 * 60 * 60 * 1000
@@ -31,7 +32,43 @@ const TTL = 6 * 60 * 60 * 1000
 const META_TYPE = { docx: 'docx', sheet: 'sheet', bitable: 'bitable', slides: 'slides', mindnote: 'mindnote', file: 'file' }
 
 /** Feishu's answers for "this document is gone", as opposed to "you may not see it". */
-const GONE = /not exist|not found|no such|不存在|已删除|已被删除|deleted/i
+/**
+ * What "gone" reads like across Feishu's document APIs.
+ *
+ * A deleted sheet answers `1310249 Path param :spreadsheet_token is deleted`, a token
+ * that never existed answers `1310214 … is not exist`; other families say `not found`
+ * or `NOTEXIST`. All of them mean the link is dead, which is what the list marks.
+ */
+const GONE = /is deleted|not exist|no such|not[ _-]?found|不存在|已删除|已被删除|\bdeleted\b|NOTEXIST|1770002/i
+
+/**
+ * What "I am not allowed to know" reads like — the document may well exist.
+ *
+ * These must never be reported as deleted: a permission or scope gap says nothing
+ * about the file, and a false "已删除" next to a live document is worse than silence.
+ */
+const NO_ACCESS = /unauthorized|access denied|no permission|permission denied|forbidden|missing_scope|app_scope_not_applied|99991672|99991679/i
+
+/**
+ * One existence probe per document family.
+ *
+ * `drive +inspect` is *not* one of them: it only parses the URL and answers `ok` for a
+ * token that does not exist, so it could never report a deletion.
+ */
+const PROBES = {
+  sheet: (token) => `/open-apis/sheets/v3/spreadsheets/${token}`,
+  docx: (token) => `/open-apis/docx/v1/documents/${token}`,
+  base: (token) => `/open-apis/bitable/v1/apps/${token}`,
+  slides: (token) => `/open-apis/slides/v1/presentations/${token}`,
+}
+
+/** The title each family nests in its own response. */
+const TITLE_PATHS = {
+  sheet: (data) => data.spreadsheet && data.spreadsheet.title,
+  docx: (data) => data.document && data.document.title,
+  base: (data) => data.app && data.app.name,
+  slides: (data) => data.presentation && data.presentation.title,
+}
 
 /** Token of a document URL — the last path segment. */
 function tokenOf(doc) {
@@ -124,15 +161,21 @@ async function scan(docs) {
  *   `'unknown'`; permission, scope, network and credential failures are all
  *   `'unknown'`, because none of them mean the document is gone.
  */
-async function checkDocument(url) {
-  const parsed = await invoke(['drive', '+inspect', '--as', 'user', '--url', url], 10000)
+async function checkDocument(doc) {
+  const probe = PROBES[doc && doc.ty]
+  if (!probe) return { verdict: 'unknown', title: '' }
+  const parsed = await invoke(['api', 'GET', probe(tokenOf(doc)), '--as', 'user'], 6000)
   if (!parsed) return { verdict: 'unknown', title: '' }
   if (parsed.ok) {
-    const answer = parsed.data || {}
-    return { verdict: 'exists', title: String(answer.title || answer.name || '').trim() }
+    const data = parsed.data || {}
+    const read = TITLE_PATHS[doc.ty]
+    const title = read ? String(read(data) || '').trim() : ''
+    return { verdict: 'exists', title }
   }
   const error = parsed.error || {}
   const said = `${error.subtype || ''} ${error.message || ''} ${error.code || ''}`
+  // Permission first: a document I may not read is not a document that is gone.
+  if (NO_ACCESS.test(said)) return { verdict: 'unknown', title: '' }
   return { verdict: GONE.test(said) ? 'deleted' : 'unknown', title: '' }
 }
 
@@ -214,48 +257,61 @@ export async function enrichCreators(docs) {
     return nameless && !(row.title || gaveUp || row.deleted)
   })
 
+  // Existence is a separate question from naming: a document in the trash still has
+  // metadata and a title, so probing only the nameless ones would never see a deletion.
+  const toProbe = docs.filter((doc) => {
+    const row = cache.tokens[tokenOf(doc)]
+    return !row || !row.probedAt || Date.now() - row.probedAt > TTL
+  })
+
+  // Probing does not depend on the metadata call, so it starts alongside it.
+  const probing = toProbe.length
+    ? mapLimit(toProbe, 5, async (doc) => {
+        const { verdict, title } = await checkDocument(doc)
+        const row = (cache.tokens[tokenOf(doc)] = cache.tokens[tokenOf(doc)] || {})
+        if (verdict === 'deleted') row.deleted = true
+        else if (verdict === 'exists') delete row.deleted
+        if (verdict !== 'unknown') row.probedAt = Date.now()
+        if (title) {
+          row.title = title
+          delete row.noTitleAt
+          row.checkedAt = Date.now()
+        } else if (verdict === 'exists' && !row.title) {
+          row.noTitleAt = Date.now()
+          row.checkedAt = Date.now()
+        }
+      })
+    : Promise.resolve()
+
   if (ask.length) {
     const { owners, titles, known } = await scan(ask)
     for (const [token, owner] of owners) {
       const row = (cache.tokens[token] = cache.tokens[token] || {})
       row.owner = owner
       row.checkedAt = Date.now()
-      delete row.deleted
+      // Metadata answering does not mean the document is alive: a document in the
+      // trash still has an owner and a title. Only the existence probe decides.
     }
     for (const [token, title] of titles) {
       const row = (cache.tokens[token] = cache.tokens[token] || {})
       row.title = title
       row.checkedAt = Date.now()
-      delete row.deleted
       delete row.noTitleAt
     }
     for (const token of known) {
       const row = (cache.tokens[token] = cache.tokens[token] || {})
       row.checkedAt = Date.now()
-      delete row.deleted
     }
 
-    // Whatever the metadata call did not answer — a gone document, or one it
-    // has no title for — is asked about directly.
-    const pending = ask.filter((doc) => !known.has(tokenOf(doc)) || !titles.has(tokenOf(doc)))
-    await mapLimit(pending, 3, async (doc) => {
-      const { verdict, title } = await checkDocument(doc.u)
-      const row = (cache.tokens[tokenOf(doc)] = cache.tokens[tokenOf(doc)] || {})
-      if (verdict === 'deleted') row.deleted = true
-      else if (verdict === 'exists') delete row.deleted
-      if (title) {
-        row.title = title
-        delete row.noTitleAt
-        row.checkedAt = Date.now()
-      } else if (verdict === 'exists') {
-        // Feishu answered — the document exists — and had no name for it: stop
-        // asking until the TTL.
-        row.noTitleAt = Date.now()
-        row.checkedAt = Date.now()
-      }
-      // An unanswered probe (timeout, permission, network) changes nothing but
-      // the verdict it may have learned; it is retried on the next open.
-    })
+  }
+
+  // The existence verdict does not block the first paint: it costs one call per
+  // document and the popover polls, so a deletion appears on the next tick. Its
+  // results are saved on their own, because the cache below is written without them.
+  if (toProbe.length) {
+    void probing.then(() => saveCache(cache)).catch(() => {})
+  } else {
+    void probing.catch(() => {})
   }
 
   const owners = [...new Set(Object.values(cache.tokens).map((row) => row && row.owner).filter(Boolean))]

@@ -38,6 +38,27 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 退出只清除本机的飞书登录态，不动你的文档。退出后浮层会立刻变成「未登录飞书」，并出现「去授权」，重新授权一次即可恢复创建者、真实标题和删除标记。
 
+## 已删除的文档怎么标出来
+
+列表里已删除的文档：**名字加删除线 + 灰色 + 红底「已删除」标记**。
+
+判定方式（每篇文档单独问 Feishu，按类型选接口）：
+
+| 类型 | 探测接口 |
+|---|---|
+| 表格 | `GET /open-apis/sheets/v3/spreadsheets/{token}` |
+| 文档 | `GET /open-apis/docx/v1/documents/{token}` |
+| 多维表格 | `GET /open-apis/bitable/v1/apps/{token}` |
+| 幻灯片 | `GET /open-apis/slides/v1/presentations/{token}` |
+
+**为什么不只看元数据**：`drive/v1/metas/batch_query` 对**回收站里**的文档照样返回 owner 和 title，所以"有元数据"不等于"还在"。只有上面这些内容接口会明确回 `… is deleted`。
+
+**为什么不用 `drive +inspect`**：它只解析 URL，伪造一个 token 也返回 `ok: true`，永远探测不出删除（这也是一开始删除线不生效的原因）。
+
+**权限不足不算删除**：`unauthorized` / `missing_scope` / `app_scope_not_applied` 一律判为"未知"，绝不把读不到的文档标成已删除。
+
+**成本**：每篇文档每 6 小时探测一次（`TTL`），**在后台进行、不阻塞面板打开**；结论写进 `~/.dsh/feishu-docs-owners.json`，之后每 2.5 秒的轮询会自然把删除线补上。
+
 ## 授权只在一处定义
 
 所有"要哪些权限"的判断都归 **`setup.js`**，登录按钮、设置面板、授权检查三条入口共用同一份清单：
@@ -267,7 +288,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.8.2
+[feishu-docs] client apply, version 3.9.0
 [feishu-docs] header chip registered
 ```
 

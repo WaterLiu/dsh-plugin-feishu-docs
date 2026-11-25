@@ -27,7 +27,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.2', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.9.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -36,7 +36,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.2', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.9.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1481,7 +1481,8 @@ window.__ModuleLoader__.load({
                    opacity:.6; background:color-mix(in srgb, currentColor 8%, transparent); }
           .fd-pop-new { flex:none; font-size:10px; padding:0 4px; border-radius:4px;
                         color:#0B7A3B; background:color-mix(in srgb, #34C724 22%, transparent); }
-          .fd-pop-gone a { opacity:.5; text-decoration:line-through; }
+          .fd-pop-gone a { opacity:.55; text-decoration:line-through;
+                           text-decoration-thickness:1.3px; text-decoration-color:currentColor; }
           .fd-pop-del { flex:none; font-size:10px; padding:0 4px; border-radius:4px;
                         color:#B42318; background:color-mix(in srgb, #F04438 16%, transparent); }
           .fd-setup { margin:8px 10px; padding:9px 11px 10px; border-radius:10px;
@@ -1767,7 +1768,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.8.2')
+        console.info('[feishu-docs] client apply, version 3.9.0')
         beacon('apply')
 
         try {
