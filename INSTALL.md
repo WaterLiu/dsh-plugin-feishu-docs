@@ -40,16 +40,28 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 ## 账号栏显示什么
 
-| 位置 | 内容 | 来源 |
-|---|---|---|
-| 第一行 | 你的飞书昵称 | `authen/v1/user_info` |
-| 第二行 | **企业/组织名称**；没授组织权限时显示「飞书用户」 | 租户**根部门**名称（`contact/v3/departments/0`） |
+| 位置 | 内容 |
+|---|---|
+| 第一行 | 你的飞书昵称 |
+| 第二行 | **企业主体名称** + **认证徽标**（`已认证` / `未认证`）；读不到时显示中性的「飞书用户」 |
 
-为什么不是「飞书个人用户」：那句话对**企业租户**是错的，而且它原本只是"用户身份（相对应用/机器人）"的意思，容易误解。现在按真实数据来：拿到组织名就显示组织名，拿不到就显示中性的「飞书用户」。
+### 数据从哪来（三档降级）
 
-**企业名称为什么需要额外授权**：飞书**没有**给用户 token 查询租户信息的接口——`tenant/v2/tenant/query` 只接受应用（tenant）token，直接返回 `user access token not support`。能拿到的等价信息是「根部门名称」（飞书用公司名命名根部门），只读权限 `contact:contact.base:readonly` 即可。所以设置面板里会出现一条可选项，点一次授权后面就会显示企业名。
+| 顺序 | 接口 | 身份 | 权限 | 能给出 |
+|---|---|---|---|---|
+| 1 | `GET /open-apis/verification/v1/verification` | 应用（tenant token） | `verification:verification_information:readonly` | **企业主体名称 + `has_verification`（是否已认证）** |
+| 2 | `GET /open-apis/tenant/v2/tenant/query` | 应用 | `tenant:tenant:readonly` | 企业名称 + 组织类型（个人/企业/教育） |
+| 3 | `GET /open-apis/contact/v3/departments/0` | 用户 | `contact:contact.base:readonly` | 租户**根部门名**（飞书用公司名命名），不含认证状态 |
 
-**关于"认证状态"**：飞书开放平台**没有**把企业认证/个人认证状态暴露给用户 token（没有对应接口，也没有 `tenant_tag` 的可用路径——那也在 tenant token 里）。所以这个插件**不显示**认证徽标，也不猜；要显示只能再配一个应用身份（应用凭据 → tenant token），那是另一套配置，需要的话我再加。
+只有第 1 档能回答"是否已认证"，且它必须用**应用身份**——用户 token 调 `tenant/v2/tenant/query` 会直接报 `user access token not support`。
+
+### 第一次要做的操作（一次性）
+
+浮层里会出现一条「企业名称与认证状态」，点**去开通权限**会直接打开开发者后台对应页面（带好 `clientID` 和 `scopes` 参数），给应用勾选 `verification:verification_information:readonly` 并发布版本，管理员审核通过后即可显示。没开通之前：显示「飞书用户」，**不显示任何猜测出来的认证状态**（`orgVerified` 为 `null` 表示"不知道"，不是"未认证"）。
+
+### 为什么不再写「飞书个人用户」
+
+那句话对**企业租户**是错的，而且原意只是"用户身份（相对应用/机器人）"。现在按真实数据来：有企业名就显示企业名，没有就显示中性的「飞书用户」。
 
 ## 文档是怎么和对话对上的：turn 块
 
@@ -199,7 +211,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.6.0
+[feishu-docs] client apply, version 3.7.0
 [feishu-docs] header chip registered
 ```
 

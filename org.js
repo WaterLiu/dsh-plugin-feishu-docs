@@ -1,14 +1,22 @@
 /**
- * The organisation the signed-in user belongs to.
+ * The organisation behind the signed-in user, and whether it is verified.
  *
- * A Feishu user token does not answer "which company is this": `tenant/v2/tenant/query`
- * needs a tenant (app) token and is rejected with `user access token not support`, and
- * `authen/v1/user_info` only carries an opaque `tenant_key`. What *is* reachable with a
- * user token is the tenant's root department — Feishu names it after the company — so
- * that is what this module reads, with one read-only scope (`contact:contact.base:readonly`).
+ * Three sources are tried in order, because each needs a different scope and the
+ * best answer is not always available:
  *
- * The tenant's verified badge is deliberately absent: Feishu's open platform does not
- * expose 企业认证 to user tokens, and inventing a label would be worse than omitting it.
+ * 1. `GET /open-apis/verification/v1/verification` — the intended API. Returns the
+ *    企业主体名称 and `has_verification`, which is exactly "who is this and are they
+ *    verified". Needs a **tenant** access token and `verification:verification_information:readonly`.
+ * 2. `GET /open-apis/tenant/v2/tenant/query` — tenant name plus `tenant_tag`
+ *    (0 个人 / 1 企业 / 2 教育). Also a tenant token, scope `tenant:tenant:readonly`.
+ * 3. `GET /open-apis/contact/v3/departments/0` — the tenant's root department, which
+ *    Feishu names after the company. Works with a **user** token and
+ *    `contact:contact.base:readonly`, but says nothing about verification.
+ *
+ * A user token alone can never answer "is this tenant verified": the tenant token is
+ * mandatory for 1 and 2. When none of the three answers, the returned name is empty
+ * and `error` says which scope to grant — the popover then says "飞书用户" rather than
+ * claiming anything.
  *
  * @author WaterLiu
  */
@@ -23,8 +31,11 @@ const DSH_HOME = join(homedir(), '.dsh')
 const STATE = process.env.FEISHU_DOCS_STATE_DIR || DSH_HOME
 const CACHE = join(STATE, 'feishu-docs-org.json')
 
-/** A company name rarely changes: a day of caching is plenty, and cheap to refresh. */
+/** A company name and its verification rarely change; a day of caching is plenty. */
 const TTL = 24 * 60 * 60 * 1000
+
+/** Tenant tags the tenant API can return, spelled the way a person reads them. */
+const TENANT_TAGS = { 0: '个人', 1: '企业', 2: '教育' }
 
 /** Read the cache, tolerating a missing or corrupt file. */
 async function readCache() {
@@ -46,40 +57,113 @@ async function writeCache(value) {
 }
 
 /**
- * The tenant's name, from its root department.
+ * Pull the scope-apply URL out of a CLI error.
  *
- * @returns `{ name, at, error }` — `name` is empty when the scope is missing, and
- *   `error` then says which scope to grant.
+ * The app-scope error is the one a developer can act on, and the CLI prints the exact
+ * console link for it. Surfacing that link turns "it does not work" into one click.
+ *
+ * @param answer - the parsed CLI envelope of a failed call.
+ * @returns the URL, or '' when the failure has none.
+ */
+function scopeApplyUrl(answer) {
+  const error = (answer && answer.error) || {}
+  // The CLI ships a ready-made URL; the hint carries the same one in prose.
+  if (error.console_url) return String(error.console_url)
+  const found = String(error.hint || '').match(/https:\/\/open\.feishu\.cn\/page\/scope-apply\S+/)
+  return found ? found[0] : ''
+}
+
+/** Source 1: 认证信息 — subject name and verification state. */
+async function fromVerification() {
+  const answer = await invoke(['api', 'GET', '/open-apis/verification/v1/verification', '--as', 'bot'])
+  const info = answer && answer.ok && answer.data ? answer.data.verification : null
+  if (!info) return { ok: false, answer }
+  return {
+    ok: true,
+    value: {
+      name: String(info.name || '').trim(),
+      verified: typeof info.has_verification === 'boolean' ? info.has_verification : null,
+      tag: '',
+      source: 'verification',
+    },
+  }
+}
+
+/** Source 2: 企业信息 — tenant name and its type. */
+async function fromTenant() {
+  const answer = await invoke(['api', 'GET', '/open-apis/tenant/v2/tenant/query', '--as', 'bot'])
+  const tenant = answer && answer.ok && answer.data ? answer.data.tenant : null
+  if (!tenant) return { ok: false, answer }
+  return {
+    ok: true,
+    value: {
+      name: String(tenant.name || '').trim(),
+      verified: null,
+      tag: TENANT_TAGS[tenant.tenant_tag] || '',
+      source: 'tenant',
+    },
+  }
+}
+
+/** Source 3: the root department, which a user token can read. */
+async function fromRootDepartment() {
+  const answer = await invoke(['api', 'GET', '/open-apis/contact/v3/departments/0', '--params',
+    '{"department_id_type":"open_department_id"}'])
+  const department = answer && answer.ok && answer.data ? (answer.data.department || answer.data) : null
+  if (!department) return { ok: false, answer }
+  const name = String(department.name || department.i18n_name || '').trim()
+  if (!name) return { ok: false, answer }
+  return { ok: true, value: { name, verified: null, tag: '', source: 'department' } }
+}
+
+/**
+ * The organisation name, its verification state when known, and what to do if not.
+ *
+ * @returns `{ name, verified, tag, source, at, error, fixUrl }` — `verified` is
+ *   `true`/`false` only from the verification API, and `null` when that API was not
+ *   available, because guessing it would be worse than leaving it blank.
  */
 export async function orgFor() {
   const cached = await readCache()
   if (cached && cached.name && Date.now() - (cached.at || 0) < TTL) {
-    return { name: cached.name, at: cached.at || 0, error: '' }
+    return { ...cached, error: '', fixUrl: '' }
   }
 
-  // Department id 0 is the root of the tenant's department tree.
-  const answer = await invoke(['api', 'GET', '/open-apis/contact/v3/departments/0', '--params',
-    '{"department_id_type":"open_department_id"}'])
-  const department = answer && answer.ok && answer.data
-    ? (answer.data.department || answer.data)
-    : null
-  const name = String((department && (department.name || department.i18n_name)) || '').trim()
-  if (!name) {
-    // The CLI names the scope in its error, which is exactly what the panel shows.
-    return { name: (cached && cached.name) || '', at: (cached && cached.at) || 0, error: why(answer) }
+  const attempts = [fromVerification, fromTenant, fromRootDepartment]
+  let lastFailure = null
+  for (const attempt of attempts) {
+    const result = await attempt()
+    if (result.ok) {
+      const at = Date.now()
+      const value = { ...result.value, at }
+      await writeCache(value)
+      return { ...value, error: '', fixUrl: '' }
+    }
+    lastFailure = lastFailure || result.answer
   }
 
-  const at = Date.now()
-  await writeCache({ name, at })
-  return { name, at, error: '' }
+  // Nothing worked: keep whatever was cached, and say what would fix it.
+  return {
+    name: (cached && cached.name) || '',
+    verified: cached ? cached.verified ?? null : null,
+    tag: (cached && cached.tag) || '',
+    source: (cached && cached.source) || '',
+    at: (cached && cached.at) || 0,
+    error: why(lastFailure) || 'no answer from Feishu',
+    fixUrl: scopeApplyUrl(lastFailure),
+  }
 }
 
 /**
  * The cached organisation without touching the network — what a first paint may use.
  *
- * @returns `{ name, at }`, with an empty name when nothing has been stored yet.
+ * @returns `{ name, verified, tag }`, empty when nothing has been stored yet.
  */
 export async function cachedOrg() {
   const cached = await readCache()
-  return { name: (cached && cached.name) || '', at: (cached && cached.at) || 0 }
+  return {
+    name: (cached && cached.name) || '',
+    verified: cached ? cached.verified ?? null : null,
+    tag: (cached && cached.tag) || '',
+  }
 }

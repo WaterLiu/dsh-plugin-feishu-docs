@@ -205,6 +205,9 @@ export async function diagnose() {
     auth = probe.state || (await authState())
   }
 
+  // Asked before the items are built, because one of them is about this answer.
+  const org = auth.available ? await orgFor() : { name: '', verified: null, tag: '', source: '', at: 0, error: '', fixUrl: '' }
+
   const items = []
   items.push({
     id: 'zstd',
@@ -239,6 +242,24 @@ export async function diagnose() {
         : missingNice.length
           ? `已授权${auth.userName ? `（${auth.userName}）` : ''}；再授通讯录权限即可显示人名、企业名称而不是 id`
           : `已授权${auth.userName ? `（${auth.userName}）` : ''}${auth.expiresAt ? ` · 到期 ${auth.expiresAt.slice(0, 16).replace('T', ' ')}` : ''}`
+    // The organisation name and its verified badge need a *tenant* token, so this is
+    // an app-level scope: the fix is a console link, not another user login.
+    if (auth.available && !auth.org) {
+      items.push({
+        id: 'org',
+        title: '企业名称与认证状态',
+        ok: false,
+        detail: auth.orgError
+          ? `需要应用权限 verification:verification_information:readonly：${auth.orgError}`
+          : '需要应用权限 verification:verification_information:readonly（查看租户认证信息）',
+        fix: {
+          kind: 'link',
+          url: org.fixUrl || 'https://open.feishu.cn/app',
+          label: org.fixUrl ? '去开通权限' : '打开开发者后台',
+        },
+      })
+    }
+
     items.push({
       id: 'auth',
       title: '飞书授权',
@@ -260,8 +281,6 @@ export async function diagnose() {
 
   // Cached on disk by avatar.js: only the first open waits for the download.
   const avatar = auth.available ? await avatarFor(auth.openId) : { bytes: null, url: '', at: 0, error: '' }
-  // The tenant's name, when the read-only organisation scope is granted.
-  const org = auth.available ? await orgFor() : { name: '', at: 0, error: '' }
   const user = {
     available: auth.available,
     name: auth.userName,
@@ -274,6 +293,11 @@ export async function diagnose() {
     // says just "飞书用户" rather than claiming anything about the account.
     org: org.name || '',
     orgError: org.error || '',
+    // From the 认证信息 API only: `null` means "not known", never "not verified".
+    orgVerified: typeof org.verified === 'boolean' ? org.verified : null,
+    orgTag: org.tag || '',
+    orgSource: org.source || '',
+    orgFixUrl: org.fixUrl || '',
   }
 
   return {

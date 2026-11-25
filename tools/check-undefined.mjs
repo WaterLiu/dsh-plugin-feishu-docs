@@ -146,6 +146,8 @@ function collectDeclared(text) {
     }
   }
   for (const m of text.matchAll(/([A-Za-z_$][\w$]*)\s*=>/g)) declared.add(m[1])
+  // loop bindings: `for (const name of …)` / `for (let name in …)`
+  for (const m of text.matchAll(/for\s*\(\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s+(?:of|in)\b/g)) declared.add(m[1])
   // Object/class member shorthand: `name(` at the start of a line. Deliberately
   // strict — a looser rule treated `{ ..., missingFn() }` as a method definition and
   // hid a genuinely undefined call.

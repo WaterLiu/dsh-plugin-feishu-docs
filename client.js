@@ -27,7 +27,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.6.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.7.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -36,7 +36,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.6.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.7.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1506,6 +1506,10 @@ window.__ModuleLoader__.load({
           .fd-user-text { flex:1 1 auto; min-width:0; }
           .fd-user-name { font-size:12.5px; font-weight:600; line-height:1.3;
                           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          .fd-user-badge { margin-left:5px; padding:0 5px; border-radius:6px; font-size:9.5px;
+                           line-height:1.5; background:color-mix(in srgb, #34C759 16%, transparent);
+                           color:#1F8A3D; }
+          .fd-user-badge-off { background:color-mix(in srgb, currentColor 10%, transparent); color:inherit; }
           .fd-user-sub { font-size:10.5px; opacity:.55; line-height:1.3;
                          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
           .fd-user-count { position:absolute; left:50%; transform:translateX(-50%);
@@ -1571,7 +1575,15 @@ window.__ModuleLoader__.load({
                     // "飞书用户" otherwise. It used to say "个人用户", which is simply
                     // wrong for an enterprise tenant.
                     user.available
-                      ? user.org || `${user.brand === 'lark' ? 'Lark' : '飞书'}用户`
+                      ? h('span', null,
+                          user.org || `${user.brand === 'lark' ? 'Lark' : '飞书'}用户`,
+                          // Only the 认证信息 API can answer this; `null` means unknown,
+                          // and an unknown state is shown as nothing rather than a guess.
+                          user.orgVerified === true
+                            ? h('span', { className: 'fd-user-badge' }, '已认证')
+                            : user.orgVerified === false
+                              ? h('span', { className: 'fd-user-badge fd-user-badge-off' }, '未认证')
+                              : null)
                       : '点右侧「登录」授权飞书'),
                 ),
                 // The list's title and count live in the account row now: centred,
@@ -1623,6 +1635,11 @@ window.__ModuleLoader__.load({
                             className: 'fd-setup-go', type: 'button',
                             onClick: (e) => { e.preventDefault(); copyText(item.fix.command); flash(`已复制：${item.fix.command}`, 2600) },
                           }, '复制命令')
+                        : item.fix.kind === 'link'
+                        ? h('a', {
+                            className: 'fd-setup-go', href: item.fix.url, target: '_blank', rel: 'noreferrer',
+                            onClick: (e) => e.stopPropagation(),
+                          }, item.fix.label || '去开通')
                         : h('button', {
                             className: 'fd-setup-go', type: 'button',
                             onClick: (e) => { e.preventDefault(); if (!authFlow.busy) startAuth(item.fix.scopes) },
@@ -1726,7 +1743,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.6.0')
+        console.info('[feishu-docs] client apply, version 3.7.0')
         beacon('apply')
 
         try {
