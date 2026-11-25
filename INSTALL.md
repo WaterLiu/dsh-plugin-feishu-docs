@@ -38,6 +38,18 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 退出只清除本机的飞书登录态，不动你的文档。退出后浮层会立刻变成「未登录飞书」，并出现「去授权」，重新授权一次即可恢复创建者、真实标题和删除标记。
 
+## 授权只在一处定义
+
+所有"要哪些权限"的判断都归 **`setup.js`**，登录按钮、设置面板、授权检查三条入口共用同一份清单：
+
+| 清单 | 内容 | 能否通过用户授权获得 |
+|---|---|---|
+| `REQUIRED_SCOPES` | `drive:drive.metadata:readonly` | 能（登录时必须） |
+| `NICE_SCOPES` | `contact:user:search`、`contact:contact.base:readonly` | 能（可选，影响人名/企业名） |
+| `APP_SCOPES` | `verification:verification_information:readonly`、`tenant:tenant:readonly` | **不能**：属于应用身份，只能在开发者后台申请并由管理员审核 |
+
+规则：`loginScopesFor()` 统一决定这次登录请求哪些权限——未登录时给「必需+可选」，已登录且缺权限时只补缺的，并且**永远剔掉 `APP_SCOPES`**（把应用级权限塞进设备码流程会让整次授权失败）。`doctor.json` 会直接把结果作为 `loginScopes` 下发，前端不再维护自己的副本（之前就是这么漏掉 `contact:contact.base:readonly` 的）。
+
 ## 账号栏显示什么
 
 | 位置 | 内容 |
@@ -211,7 +223,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.7.0
+[feishu-docs] client apply, version 3.8.0
 [feishu-docs] header chip registered
 ```
 

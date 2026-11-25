@@ -27,7 +27,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.7.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -36,7 +36,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.7.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1328,10 +1328,17 @@ window.__ModuleLoader__.load({
       }), [docs, creator, needle])
       // A new account means the previous failure no longer applies.
       useEffect(() => { setAvatarBroken(false) }, [user.avatarAt])
-      /** Scopes to request from the avatar's login button, honouring the diagnosis. */
+      /**
+       * Scopes to request from the avatar's login button.
+       *
+       * The host decides — it owns `REQUIRED_SCOPES`/`NICE_SCOPES` and strips the
+       * app-level ones a user token can never carry. This used to be a hardcoded copy
+       * here, which quietly stopped matching the moment a scope was added on the host.
+       */
       const loginScopes = () => {
+        if (doctor && Array.isArray(doctor.loginScopes) && doctor.loginScopes.length) return doctor.loginScopes
         const authItem = doctor && Array.isArray(doctor.items) && doctor.items.find((item) => item.id === 'auth')
-        return (authItem && authItem.fix && authItem.fix.scopes) || ['drive:drive.metadata:readonly', 'contact:user:search']
+        return (authItem && authItem.fix && authItem.fix.scopes) || []
       }
 
       // Close on an outside press or Escape; both listeners live only while open.
@@ -1743,7 +1750,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.7.0')
+        console.info('[feishu-docs] client apply, version 3.8.0')
         beacon('apply')
 
         try {

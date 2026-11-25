@@ -30,6 +30,42 @@ const REQUIRED_SCOPES = ['drive:drive.metadata:readonly']
 const NICE_SCOPES = ['contact:user:search', 'contact:contact.base:readonly']
 
 /**
+ * Scopes that a **user** authorization can never grant.
+ *
+ * These belong to the app (tenant) token and are applied in the developer console,
+ * then approved by a tenant admin — `auth login` cannot request them, and asking for
+ * them there would fail the whole device flow. They live here so that nobody adds
+ * them to the lists above by mistake, and so the panel can name what is missing.
+ */
+const APP_SCOPES = ['verification:verification_information:readonly', 'tenant:tenant:readonly']
+
+/** Every user-level scope this plugin can use, in one place. */
+function allUserScopes() {
+  return [...REQUIRED_SCOPES, ...NICE_SCOPES]
+}
+
+/**
+ * The scopes a login should ask for.
+ *
+ * One place decides this, because the popover used to keep its own copy and it went
+ * stale — the 企业名称 scope was added here and the copy never learned about it.
+ *
+ * @param state - an `authState()` answer: `{ available, missing }`.
+ * @returns user-level scopes only; app-level ones are filtered out by construction.
+ */
+export function loginScopesFor(state = {}) {
+  const explicit = Array.isArray(state.explicit) ? state.explicit.filter(Boolean) : []
+  const missing = Array.isArray(state.missing) ? state.missing.filter(Boolean) : []
+  const wanted = explicit.length
+    ? explicit
+    : state.available && missing.length
+      ? missing
+      : allUserScopes()
+  // Defensive: a caller that passes an app-level scope must not break the flow.
+  return [...new Set(wanted)].filter((scope) => !APP_SCOPES.includes(scope))
+}
+
+/**
  * Device-flow completions still running in the background, by device code.
  *
  * The CLI blocks until the user authorizes, which can take minutes. Running that
@@ -72,7 +108,7 @@ async function authState() {
   const state = {
     available: false, userName: '', openId: '', brand: 'feishu',
     expiresAt: '', refreshExpiresAt: '', tokenStatus: '', canRefresh: false,
-    missing: [], required: REQUIRED_SCOPES, nice: NICE_SCOPES,
+    missing: [], required: REQUIRED_SCOPES, nice: NICE_SCOPES, app: APP_SCOPES,
   }
   const status = await invoke(['auth', 'status', '--json'])
   if (status && status.brand) state.brand = status.brand
@@ -89,7 +125,7 @@ async function authState() {
   // tells "needs renewing" apart from "needs the user again".
   state.canRefresh = !state.available && Boolean(user.available) && isFuture(user.refreshExpiresAt)
   if (!state.available) return state
-  const checked = await invoke(['auth', 'check', '--scope', [...REQUIRED_SCOPES, ...NICE_SCOPES].join(' '), '--json'])
+  const checked = await invoke(['auth', 'check', '--scope', allUserScopes().join(' '), '--json'])
   if (checked) state.missing = Array.isArray(checked.missing) ? checked.missing : []
   return state
 }
@@ -149,7 +185,7 @@ export async function refreshAuth({ force = false } = {}) {
       return { ok: before.available, via: '', reason: probeState.reason, tookMs: probeState.tookMs, state: before }
     }
 
-    const scopes = [...REQUIRED_SCOPES, ...NICE_SCOPES].join(' ')
+    const scopes = allUserScopes().join(' ')
     let via = ''
     let detail = ''
 
@@ -274,7 +310,8 @@ export async function diagnose() {
       // the whole set, because there is nothing to compare against.
       fix: auth.available && !auth.missing.length ? null : {
         kind: 'auth',
-        scopes: auth.available ? [...new Set(auth.missing)] : [...REQUIRED_SCOPES, ...NICE_SCOPES],
+        // Same rule as every other entry point — never a second copy of the list.
+        scopes: loginScopesFor(auth),
       },
     })
   }
@@ -311,6 +348,9 @@ export async function diagnose() {
     zstdPath: zstd.zstdPath,
     node: process.version,
     larkCli: bin,
+    // The one list a login button should request. The popover used to keep its own
+    // copy, which silently missed every scope added after it was written.
+    loginScopes: loginScopesFor(auth),
     auth: {
       ...auth,
       missingRequired: auth.missing.filter((scope) => REQUIRED_SCOPES.includes(scope)),
@@ -328,7 +368,8 @@ export async function diagnose() {
  * @returns `{ url, deviceCode, expiresIn }` — `url` is what the user opens.
  */
 export async function startLogin(scopes) {
-  const wanted = Array.isArray(scopes) && scopes.length ? scopes : [...REQUIRED_SCOPES, ...NICE_SCOPES]
+  // Same rule as the button: only user-level scopes, never the app-level ones.
+  const wanted = loginScopesFor({ explicit: Array.isArray(scopes) ? scopes : [] })
   const answer = await invoke(['auth', 'login', '--scope', wanted.join(' '), '--no-wait', '--json'], 30000)
   if (!answer) return { error: 'lark-cli 没有返回结果' }
   if (answer.ok === false) return { error: (answer.error && answer.error.message) || '发起授权失败' }
