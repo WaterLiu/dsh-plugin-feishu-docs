@@ -242,7 +242,9 @@ export async function diagnose() {
   }
 
   // Asked before the items are built, because one of them is about this answer.
-  const org = auth.available ? await orgFor() : { name: '', verified: null, tag: '', source: '', at: 0, error: '', fixUrl: '' }
+  const org = auth.available
+    ? await orgFor()
+    : { name: '', verified: null, kind: 'unknown', tag: '', source: '', at: 0, error: '', fixUrl: '' }
 
   const items = []
   items.push({
@@ -280,7 +282,7 @@ export async function diagnose() {
           : `已授权${auth.userName ? `（${auth.userName}）` : ''}${auth.expiresAt ? ` · 到期 ${auth.expiresAt.slice(0, 16).replace('T', ' ')}` : ''}`
     // The organisation name and its verified badge need a *tenant* token, so this is
     // an app-level scope: the fix is a console link, not another user login.
-    if (auth.available && !auth.org) {
+    if (auth.available && !org.name && org.kind !== 'personal') {
       items.push({
         id: 'org',
         title: '企业名称与认证状态',
@@ -332,6 +334,8 @@ export async function diagnose() {
     orgError: org.error || '',
     // From the 认证信息 API only: `null` means "not known", never "not verified".
     orgVerified: typeof org.verified === 'boolean' ? org.verified : null,
+    // 'enterprise' | 'personal' | 'unknown' — a personal account has no badge at all.
+    orgKind: org.kind || 'unknown',
     orgTag: org.tag || '',
     orgSource: org.source || '',
     orgFixUrl: org.fixUrl || '',

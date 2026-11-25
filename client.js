@@ -27,7 +27,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -36,7 +36,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.0', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.8.1', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1583,14 +1583,18 @@ window.__ModuleLoader__.load({
                     // wrong for an enterprise tenant.
                     user.available
                       ? h('span', null,
-                          user.org || `${user.brand === 'lark' ? 'Lark' : '飞书'}用户`,
-                          // Only the 认证信息 API can answer this; `null` means unknown,
-                          // and an unknown state is shown as nothing rather than a guess.
-                          user.orgVerified === true
-                            ? h('span', { className: 'fd-user-badge' }, '已认证')
-                            : user.orgVerified === false
-                              ? h('span', { className: 'fd-user-badge fd-user-badge-off' }, '未认证')
-                              : null)
+                          // A personal account has no enterprise subject, so it gets the
+                          // plain label and no badge — "未认证" would describe nothing.
+                          user.orgKind === 'personal'
+                            ? `${user.brand === 'lark' ? 'Lark' : '飞书'}个人用户`
+                            : user.org || `${user.brand === 'lark' ? 'Lark' : '飞书'}用户`,
+                          user.orgKind === 'personal'
+                            ? null
+                            : user.orgVerified === true
+                              ? h('span', { className: 'fd-user-badge' }, '已认证')
+                              : user.orgVerified === false
+                                ? h('span', { className: 'fd-user-badge fd-user-badge-off' }, '未认证')
+                                : null)
                       : '点右侧「登录」授权飞书'),
                 ),
                 // The list's title and count live in the account row now: centred,
@@ -1750,7 +1754,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.8.0')
+        console.info('[feishu-docs] client apply, version 3.8.1')
         beacon('apply')
 
         try {

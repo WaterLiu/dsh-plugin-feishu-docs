@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-feishu-docs",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "description": "Feishu documents of each Session, read from its own log: a header chip and a per-day popover with a jump to the turn.",
   "author": "WaterLiu",
   "type": "module",

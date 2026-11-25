@@ -61,6 +61,50 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 | 顺序 | 接口 | 身份 | 权限 | 能给出 |
 |---|---|---|---|---|
+| 1 | `GET /open-apis/verification/v1/verification` | 应用（tenant token） | `verification:verification_information:readonly` | **企业主体名称 + `has_verification`** |
+| 2 | `GET /open-apis/tenant/v2/tenant/query` | 应用 | `tenant:tenant:readonly` | 企业名称 + 组织类型（个人/企业/教育） |
+| 3 | `GET /open-apis/contact/v3/departments/0` | 用户 | `contact:contact.base:readonly` | 租户**根部门名**（飞书用公司名命名），不含认证状态 |
+
+### 个人账号 vs 企业账号
+
+| 账号类型 | 界面 | 徽标 | 是否需要开权限 |
+|---|---|---|---|
+| **个人版飞书** | `飞书个人用户` | **不显示** | 不需要（面板里不会出现那条设置项） |
+| 企业（已认证） | 企业主体名称 | `已认证` | 需要（见下） |
+| 企业（未认证） | 企业主体名称 | `未认证` | 需要 |
+| 读不到 | `飞书用户` | 不显示 | — |
+
+判定方式：`verification/v1/verification` 返回 `{ has_verification: false }` 且**没有 `name` 字段** → 个人账号（没有企业主体可认证）；有 `name` 才是企业主体，`has_verification` 才有意义。
+
+> 说明：飞书另一套「实名认证」API（`human_authentication-v1`，身份录入/人脸比对）是**企业侧业务场景**用的，需要白名单与计费，与账号上显示的"认证"无关，所以不采用。
+
+### 企业账号要做的操作（一次性）
+
+浮层里会出现「企业名称与认证状态」，点**去开通权限**直接打开开发者后台对应页面（已带 `clientID` 与 `scopes`），给应用勾选 `verification:verification_information:readonly` 并发布版本、管理员审核通过后即可显示。没开通时显示「飞书用户」，**不显示任何猜测出来的认证状态**。
+
+## 授权只在一处定义
+
+所有"要哪些权限"的判断都归 **`setup.js`**，登录按钮、设置面板、授权检查三条入口共用同一份清单：
+
+| 清单 | 内容 | 能否通过用户授权获得 |
+|---|---|---|
+| `REQUIRED_SCOPES` | `drive:drive.metadata:readonly` | 能（登录时必须） |
+| `NICE_SCOPES` | `contact:user:search`、`contact:contact.base:readonly` | 能（可选，影响人名/企业名） |
+| `APP_SCOPES` | `verification:verification_information:readonly`、`tenant:tenant:readonly` | **不能**：属于应用身份，只能在开发者后台申请并由管理员审核 |
+
+规则：`loginScopesFor()` 统一决定这次登录请求哪些权限——未登录时给「必需+可选」，已登录且缺权限时只补缺的，并且**永远剔掉 `APP_SCOPES`**（把应用级权限塞进设备码流程会让整次授权失败）。`doctor.json` 会直接把结果作为 `loginScopes` 下发，前端不再维护自己的副本（之前就是这么漏掉 `contact:contact.base:readonly` 的）。
+
+## 账号栏显示什么
+
+| 位置 | 内容 |
+|---|---|
+| 第一行 | 你的飞书昵称 |
+| 第二行 | **企业主体名称** + **认证徽标**（`已认证` / `未认证`）；读不到时显示中性的「飞书用户」 |
+
+### 数据从哪来（三档降级）
+
+| 顺序 | 接口 | 身份 | 权限 | 能给出 |
+|---|---|---|---|---|
 | 1 | `GET /open-apis/verification/v1/verification` | 应用（tenant token） | `verification:verification_information:readonly` | **企业主体名称 + `has_verification`（是否已认证）** |
 | 2 | `GET /open-apis/tenant/v2/tenant/query` | 应用 | `tenant:tenant:readonly` | 企业名称 + 组织类型（个人/企业/教育） |
 | 3 | `GET /open-apis/contact/v3/departments/0` | 用户 | `contact:contact.base:readonly` | 租户**根部门名**（飞书用公司名命名），不含认证状态 |
@@ -223,7 +267,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.8.0
+[feishu-docs] client apply, version 3.8.1
 [feishu-docs] header chip registered
 ```
 
