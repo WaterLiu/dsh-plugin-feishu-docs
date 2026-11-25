@@ -16,6 +16,7 @@ import { execFile } from 'node:child_process'
 import zlib from 'node:zlib'
 
 import { avatarFor } from './avatar.js'
+import { orgFor } from './org.js'
 import { invoke, larkCli, run, why } from './cli.js'
 
 /** Scopes this plugin cannot work without: document metadata, titles, owners. */
@@ -26,7 +27,7 @@ const REQUIRED_SCOPES = ['drive:drive.metadata:readonly']
  * instead of an owner id. The signed-in user's avatar needs nothing extra — it
  * comes from `authen/v1/user_info`, which the token already covers.
  */
-const NICE_SCOPES = ['contact:user:search']
+const NICE_SCOPES = ['contact:user:search', 'contact:contact.base:readonly']
 
 /**
  * Device-flow completions still running in the background, by device code.
@@ -236,7 +237,7 @@ export async function diagnose() {
       : missingRequired.length
         ? `缺少必需权限：${missingRequired.join('、')}`
         : missingNice.length
-          ? `已授权${auth.userName ? `（${auth.userName}）` : ''}；再授通讯录权限即可显示人名而不是 id`
+          ? `已授权${auth.userName ? `（${auth.userName}）` : ''}；再授通讯录权限即可显示人名、企业名称而不是 id`
           : `已授权${auth.userName ? `（${auth.userName}）` : ''}${auth.expiresAt ? ` · 到期 ${auth.expiresAt.slice(0, 16).replace('T', ' ')}` : ''}`
     items.push({
       id: 'auth',
@@ -259,6 +260,8 @@ export async function diagnose() {
 
   // Cached on disk by avatar.js: only the first open waits for the download.
   const avatar = auth.available ? await avatarFor(auth.openId) : { bytes: null, url: '', at: 0, error: '' }
+  // The tenant's name, when the read-only organisation scope is granted.
+  const org = auth.available ? await orgFor() : { name: '', at: 0, error: '' }
   const user = {
     available: auth.available,
     name: auth.userName,
@@ -267,6 +270,10 @@ export async function diagnose() {
     hasAvatar: Boolean(avatar.bytes),
     avatarAt: avatar.at || 0,
     avatarError: avatar.error || '',
+    // Empty when the organisation scope is not granted yet; the popover then
+    // says just "飞书用户" rather than claiming anything about the account.
+    org: org.name || '',
+    orgError: org.error || '',
   }
 
   return {

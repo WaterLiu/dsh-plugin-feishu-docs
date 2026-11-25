@@ -27,7 +27,7 @@ function beacon(phase, extra) {
     return
   }
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.5.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.6.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -36,7 +36,7 @@ function beacon(phase, extra) {
 /** Unconditional report, used only by the jump path (a handful of calls). */
 function report(phase, extra) {
   try {
-    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.5.1', ...(extra || {}) }))
+    const payload = encodeURIComponent(JSON.stringify({ phase, version: '3.6.0', ...(extra || {}) }))
     fetch(`/x-feishu-docs/log?d=${payload}`, { headers: { 'x-feishu-docs': 'popover' } }).catch(() => {})
   } catch (error) {
     /* ignore */
@@ -1567,8 +1567,11 @@ window.__ModuleLoader__.load({
                 h('div', { className: 'fd-user-text' },
                   h('div', { className: 'fd-user-name' }, user.name || '未登录飞书'),
                   h('div', { className: 'fd-user-sub' },
+                    // The tenant's name when the read-only organisation scope is granted;
+                    // "飞书用户" otherwise. It used to say "个人用户", which is simply
+                    // wrong for an enterprise tenant.
                     user.available
-                      ? `${user.brand === 'lark' ? 'Lark' : '飞书'}个人用户`
+                      ? user.org || `${user.brand === 'lark' ? 'Lark' : '飞书'}用户`
                       : '点右侧「登录」授权飞书'),
                 ),
                 // The list's title and count live in the account row now: centred,
@@ -1723,7 +1726,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'sidebarRightTabs'],
       apply(ctx) {
         pluginCtx = ctx
-        console.info('[feishu-docs] client apply, version 3.5.1')
+        console.info('[feishu-docs] client apply, version 3.6.0')
         beacon('apply')
 
         try {

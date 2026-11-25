@@ -38,6 +38,19 @@ plugin_manager install_bundle target: "github:WaterLiu/dsh-plugin-feishu-docs"
 
 退出只清除本机的飞书登录态，不动你的文档。退出后浮层会立刻变成「未登录飞书」，并出现「去授权」，重新授权一次即可恢复创建者、真实标题和删除标记。
 
+## 账号栏显示什么
+
+| 位置 | 内容 | 来源 |
+|---|---|---|
+| 第一行 | 你的飞书昵称 | `authen/v1/user_info` |
+| 第二行 | **企业/组织名称**；没授组织权限时显示「飞书用户」 | 租户**根部门**名称（`contact/v3/departments/0`） |
+
+为什么不是「飞书个人用户」：那句话对**企业租户**是错的，而且它原本只是"用户身份（相对应用/机器人）"的意思，容易误解。现在按真实数据来：拿到组织名就显示组织名，拿不到就显示中性的「飞书用户」。
+
+**企业名称为什么需要额外授权**：飞书**没有**给用户 token 查询租户信息的接口——`tenant/v2/tenant/query` 只接受应用（tenant）token，直接返回 `user access token not support`。能拿到的等价信息是「根部门名称」（飞书用公司名命名根部门），只读权限 `contact:contact.base:readonly` 即可。所以设置面板里会出现一条可选项，点一次授权后面就会显示企业名。
+
+**关于"认证状态"**：飞书开放平台**没有**把企业认证/个人认证状态暴露给用户 token（没有对应接口，也没有 `tenant_tag` 的可用路径——那也在 tenant token 里）。所以这个插件**不显示**认证徽标，也不猜；要显示只能再配一个应用身份（应用凭据 → tenant token），那是另一套配置，需要的话我再加。
+
 ## 文档是怎么和对话对上的：turn 块
 
 会话日志里的 `turn/start` 与 `turn/end` 成对出现，中间的 `user/message`、`assistant/message`、`step` 都属于这一次问答。插件用它给每份文档锁定"来源范围"：
@@ -186,7 +199,7 @@ lark-cli auth login --scope "contact:user:search"
 打开 DevTools Console，应看到：
 
 ```
-[feishu-docs] client apply, version 3.5.1
+[feishu-docs] client apply, version 3.6.0
 [feishu-docs] header chip registered
 ```
 

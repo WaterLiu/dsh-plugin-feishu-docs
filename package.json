@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-feishu-docs",
-  "version": "3.5.1",
+  "version": "3.6.0",
   "description": "Feishu documents of each Session, read from its own log: a header chip and a per-day popover with a jump to the turn.",
   "author": "WaterLiu",
   "type": "module",
@@ -10,6 +10,7 @@
     "avatar.js",
     "owners.js",
     "setup.js",
+    "org.js",
     "cli.js",
     "client.js",
     "cordis.patch.yml",
@@ -23,7 +24,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "check-undefined": "node tools/check-undefined.mjs index.js scan.js owners.js setup.js cli.js avatar.js client.js"
+    "check-undefined": "node tools/check-undefined.mjs index.js scan.js owners.js setup.js org.js cli.js avatar.js client.js"
   },
   "keywords": [
     "dsh",
